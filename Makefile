@@ -3,7 +3,7 @@
 NAME    := game
 CFG     := nes.cfg
 SRCDIR  := src
-SRCS    := $(SRCDIR)/header.s $(SRCDIR)/main.s
+SRCS    := $(SRCDIR)/header.s $(SRCDIR)/main.s $(SRCDIR)/field.s $(SRCDIR)/chr.s
 OBJS    := $(SRCS:.s=.o)
 
 AS      := ca65

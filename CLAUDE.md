@@ -100,14 +100,40 @@ prototypes.
 - Too many hardware sprites on one line → flicker. (NPCs as BG.)
 - Forgetting to restore scroll after a $2006 write.
 - Exceeding the vblank byte budget in one frame.
+- **Palette mirror.** $3F10/$3F14/$3F18/$3F1C mirror $3F00/$3F04/$3F08/$3F0C.
+  When you write all 32 palette bytes, the sprite-palette "color 0" entries land
+  on the BG backdrop slots — so they must hold the *same* value as the backdrop,
+  or they silently overwrite it. (This caused a black battle screen: the backdrop
+  was set to blue but a sprite-palette[0] of $0F clobbered it back to black.)
+- **Real vblank budget is small.** OAM DMA burns ~513 of the ~757 CPU cycles in
+  NTSC vblank, leaving ~240. A naive `lda buf,y / sta $2007 / iny / dex / bne`
+  flush is ~15 cyc/byte → only ~16 tiles/frame are safe. The "≈160 bytes/frame"
+  figure assumes an unrolled flush and most of vblank; until that exists, spread
+  big nametable updates across frames (the slice draws windows/enemy in chunks).
+- **Full-screen redraws** (field↔battle): you cannot do these in one vblank, so
+  do them with rendering AND NMI disabled (the same safe window as boot): blank
+  PPUMASK/PPUCTRL, write VRAM freely, reset scroll, re-enable. Push hidden/updated
+  OAM via a manual DMA before re-enabling so stale sprites don't flash.
 
 -----
 
 ## Toolchain
 
 - Assembler/linker: **ca65 / ld65** (cc65 suite). Makefile-driven.
+  Install on a fresh box with `apt-get install cc65`. Build with `make`
+  (output `6502rpg.nes`); art is regenerated with `python3 tools/gen_assets.py`.
 - Test in **FCEUX** (debugger, nametable/PPU viewers) and **Mesen** (accuracy).
+- **Headless self-check:** `pip install pyntendo` gives an emulator you can drive
+  from Python — `NES('6502rpg.nes').run_frame_headless(controller1_state=[...])`
+  returns the frame as a numpy array. Script the controller, save PNGs, and diff
+  frames to verify a step before handing the ROM over (e.g. confirm "return to
+  field" is pixel-identical to the pre-encounter frame). Button order:
+  `[A, B, Select, Start, Up, Down, Left, Right]`.
 - One runnable `.nes` per milestone. Commit per verified milestone.
+- Build artifacts (`*.nes`, `*.o`, `*.dbg`) are git-ignored; commit source only.
+
+See **ARCHITECTURE.md** for the implemented slice's code map (memory layout,
+state machine, VRAM-buffer format, asset pipeline).
 
 -----
 

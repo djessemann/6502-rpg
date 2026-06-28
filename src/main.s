@@ -32,8 +32,11 @@ GS_FIELD   = 0          ; walking around
 GS_OPENING = 1          ; wiping the text window in
 GS_DIALOG  = 2          ; window shown, waiting to close
 GS_CLOSING = 3          ; wiping the text window out
+GS_BATTLE  = 4          ; encounter screen (placeholder until Step 6)
 
 WIN_STEPS  = 9          ; 8 tile chunks + 1 attribute write
+
+ENC_STEPS  = 16         ; grid steps before an encounter fires
 
 ; Facing / movement directions
 DIR_UP     = 0
@@ -86,6 +89,7 @@ mt_row:       .res 1
 
 ; dialog / window state (main-thread use only)
 gamestate:    .res 1   ; GS_*
+step_count:   .res 1   ; grid steps taken since the last encounter
 job_step:     .res 1   ; current window draw step (0..WIN_STEPS-1)
 draw_mode:    .res 1   ; 0 = opening (draw window), 1 = closing (restore field)
 vpkt_lo:      .res 1   ; packet being built: PPU address low / count
@@ -153,6 +157,10 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     bpl :-
 
     ; Rendering is still off here, so direct VRAM writes are safe.
+    lda #<pal_field
+    sta ptr
+    lda #>pal_field
+    sta ptr+1
     jsr LoadPalette
     jsr DrawField
     jsr InitGame
@@ -175,7 +183,14 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     jsr ReadInput
     jsr VBufClear       ; default: no nametable update this frame
     jsr UpdateGame      ; hero logic and/or a window draw step
-    jsr BuildOAM
+    lda gamestate
+    cmp #GS_BATTLE
+    beq @hide
+    jsr BuildOAM        ; field/dialog: draw the hero metasprite
+    jmp @sync
+@hide:
+    jsr HideHero        ; battle screen: no field sprites
+@sync:
     jsr WaitFrame       ; NMI flushes the VRAM buffer + OAM while we wait
     jmp @loop
 .endproc
@@ -456,6 +471,7 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     bne @done
     lda #ST_IDLE
     sta ent_state,x     ; aligned on the grid again
+    inc step_count      ; one completed grid step (hero only moves)
 @done:
     rts
 .endproc
@@ -620,16 +636,30 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     beq @dialog
     cmp #GS_CLOSING
     beq @closing
+    cmp #GS_BATTLE
+    beq @battle
 
     ; --- GS_FIELD ---
     jsr UpdateHero
+
+    ; Interactions and encounters only resolve when the hero is grid-aligned.
+    ldx #HERO
+    lda ent_state,x
+    cmp #ST_IDLE
+    bne @ret
+
+    ; Encounter trigger: debug button (Select) or the step counter.
+    lda pad1_new
+    and #BTN_SELECT
+    bne @encounter
+    lda step_count
+    cmp #ENC_STEPS
+    bcs @encounter
+
+    ; Otherwise: talk to the NPC with A.
     lda pad1_new
     and #BTN_A
     beq @ret
-    ldx #HERO
-    lda ent_state,x     ; only interact when grid-aligned
-    cmp #ST_IDLE
-    bne @ret
     jsr FacingNPC       ; carry set if adjacent to and facing the NPC
     bcc @ret
     lda #0
@@ -637,6 +667,16 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     lda #GS_OPENING
     sta gamestate
 @ret:
+    rts
+
+@encounter:
+    lda #0
+    sta step_count
+    jsr EnterBattle
+    rts
+
+@battle:
+    ; Placeholder until Step 6 (stub battle + return).
     rts
 
 @opening:
@@ -785,7 +825,7 @@ winattr:
     .byte $FF, $FF, $FF, $FF   ; window region -> palette 3 in all quadrants
 
 ; ----------------------------------------------------------------------------
-; LoadPalette — write all 32 palette entries (rendering must be off).
+; LoadPalette — write 32 palette entries from (ptr). Rendering must be off.
 ; ----------------------------------------------------------------------------
 .proc LoadPalette
     bit PPUSTATUS
@@ -793,12 +833,85 @@ winattr:
     sta PPUADDR
     lda #$00
     sta PPUADDR
-    ldx #$00
-:   lda palette,x
+    ldy #$00
+:   lda (ptr),y
     sta PPUDATA
-    inx
-    cpx #32
+    iny
+    cpy #32
     bne :-
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; EnterBattle — cut from the field to the battle screen. Performed with NMI
+; and rendering disabled (same safe window as boot), then both re-enabled.
+; ----------------------------------------------------------------------------
+.proc EnterBattle
+    jsr WaitFrame       ; sync to the start of a frame
+    lda #$00
+    sta PPUCTRL         ; NMI off
+    sta PPUMASK         ; rendering off -> VRAM is freely writable
+
+    jsr DrawBattle
+    lda #<pal_battle
+    sta ptr
+    lda #>pal_battle
+    sta ptr+1
+    jsr LoadPalette
+
+    ; Hide the hero and push it to the PPU now, so it never appears on the
+    ; battle screen when rendering resumes (next NMI's DMA would be too late).
+    jsr HideHero
+    lda #$00
+    sta OAMADDR
+    lda #>OAM_BUF
+    sta OAMDMA
+
+    bit PPUSTATUS       ; reset scroll before rendering resumes
+    lda #$00
+    sta PPUSCROLL
+    sta PPUSCROLL
+
+    lda #%10001000
+    sta PPUCTRL         ; NMI on, sprite pattern table 1
+    lda #%00011110
+    sta PPUMASK         ; rendering on
+
+    lda #GS_BATTLE
+    sta gamestate
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; DrawBattle — fill nametable 0 with the blank tile (solid backdrop color from
+; the battle palette). The enemy is added in Step 6. Rendering must be off.
+; ----------------------------------------------------------------------------
+.proc DrawBattle
+    bit PPUSTATUS
+    lda #$20
+    sta PPUADDR
+    lda #$00
+    sta PPUADDR
+    lda #$00
+    ldx #$04            ; 4 x 256 = 1024 bytes (tiles + attributes)
+    ldy #$00
+:   sta PPUDATA
+    iny
+    bne :-
+    dex
+    bne :-
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; HideHero — park the hero's 4 metasprite entries off-screen (battle screen).
+; ----------------------------------------------------------------------------
+.proc HideHero
+    lda #$FF
+    sta oam+0
+    sta oam+4
+    sta oam+8
+    sta oam+12
     rts
 .endproc
 
@@ -859,7 +972,7 @@ winattr:
 ; screen; the rest are seeded so later steps have sane defaults.
 ; ----------------------------------------------------------------------------
 .segment "RODATA"
-palette:
+pal_field:
     ; Background palettes:
     .byte $0F, $1A, $2A, $07   ; 0: ground  - greens + brown (grass/tree/path/wall)
     .byte $0F, $0C, $11, $21   ; 1: water   - teal/blue/light blue
@@ -869,6 +982,18 @@ palette:
     .byte $0F, $16, $27, $30
     .byte $0F, $0C, $11, $30
     .byte $0F, $1A, $2A, $30
+    .byte $0F, $0F, $30, $0F
+
+pal_battle:
+    ; Battle backdrop = navy ($01). Tiles are blank for now (Step 6 adds the
+    ; enemy); the remaining entries are seeded for that step.
+    .byte $01, $0F, $10, $30
+    .byte $01, $0F, $10, $30
+    .byte $01, $0F, $10, $30
+    .byte $01, $0F, $10, $30
+    .byte $0F, $16, $27, $30
+    .byte $0F, $06, $16, $30
+    .byte $0F, $0C, $1C, $30
     .byte $0F, $0F, $30, $0F
 
 ; ----------------------------------------------------------------------------

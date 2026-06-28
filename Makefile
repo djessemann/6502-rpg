@@ -1,6 +1,6 @@
 # Makefile — ca65/ld65 build for the NROM vertical slice.
 
-NAME    := game
+NAME    := 6502rpg
 CFG     := nes.cfg
 SRCDIR  := src
 SRCS    := $(SRCDIR)/header.s $(SRCDIR)/main.s $(SRCDIR)/field.s $(SRCDIR)/chr.s

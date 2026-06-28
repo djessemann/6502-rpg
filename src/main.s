@@ -985,12 +985,12 @@ pal_field:
     .byte $0F, $0F, $30, $0F
 
 pal_battle:
-    ; Battle backdrop = navy ($01). Tiles are blank for now (Step 6 adds the
-    ; enemy); the remaining entries are seeded for that step.
-    .byte $01, $0F, $10, $30
-    .byte $01, $0F, $10, $30
-    .byte $01, $0F, $10, $30
-    .byte $01, $0F, $10, $30
+    ; Battle backdrop = blue ($11), clearly distinct from the field. Tiles are
+    ; blank for now (Step 6 adds the enemy); remaining entries seeded for it.
+    .byte $11, $0F, $10, $30
+    .byte $11, $0F, $10, $30
+    .byte $11, $0F, $10, $30
+    .byte $11, $0F, $10, $30
     .byte $0F, $16, $27, $30
     .byte $0F, $06, $16, $30
     .byte $0F, $0C, $1C, $30

@@ -987,14 +987,17 @@ pal_field:
 pal_battle:
     ; Battle backdrop = blue ($11), clearly distinct from the field. Tiles are
     ; blank for now (Step 6 adds the enemy); remaining entries seeded for it.
+    ; NOTE: the first entry of each sprite-palette row ($3F10/$14/$18/$1C) must
+    ; match the backdrop ($11) because those addresses mirror $3F00/$04/$08/$0C;
+    ; writing $0F there would clobber the backdrop to black.
     .byte $11, $0F, $10, $30
     .byte $11, $0F, $10, $30
     .byte $11, $0F, $10, $30
     .byte $11, $0F, $10, $30
-    .byte $0F, $16, $27, $30
-    .byte $0F, $06, $16, $30
-    .byte $0F, $0C, $1C, $30
-    .byte $0F, $0F, $30, $0F
+    .byte $11, $16, $27, $30
+    .byte $11, $06, $16, $30
+    .byte $11, $0C, $1C, $30
+    .byte $11, $0F, $30, $0F
 
 ; ----------------------------------------------------------------------------
 ; Interrupt vectors

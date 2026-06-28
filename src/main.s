@@ -32,11 +32,14 @@ GS_FIELD   = 0          ; walking around
 GS_OPENING = 1          ; wiping the text window in
 GS_DIALOG  = 2          ; window shown, waiting to close
 GS_CLOSING = 3          ; wiping the text window out
-GS_BATTLE  = 4          ; encounter screen (placeholder until Step 6)
+GS_BATTLE  = 4          ; battle: enemy shown, waiting for an attack
+GS_ENEMYDIE = 5         ; erasing the enemy tiles (one row per frame)
+GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
 
 WIN_STEPS  = 9          ; 8 tile chunks + 1 attribute write
 
 ENC_STEPS  = 16         ; grid steps before an encounter fires
+DIE_DELAY  = 30         ; frames to wait after the enemy dies before returning
 
 ; Facing / movement directions
 DIR_UP     = 0
@@ -90,7 +93,8 @@ mt_row:       .res 1
 ; dialog / window state (main-thread use only)
 gamestate:    .res 1   ; GS_*
 step_count:   .res 1   ; grid steps taken since the last encounter
-job_step:     .res 1   ; current window draw step (0..WIN_STEPS-1)
+battle_timer: .res 1   ; countdown after the enemy dies
+job_step:     .res 1   ; current window/enemy draw step
 draw_mode:    .res 1   ; 0 = opening (draw window), 1 = closing (restore field)
 vpkt_lo:      .res 1   ; packet being built: PPU address low / count
 vpkt_cnt:     .res 1
@@ -185,11 +189,11 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     jsr UpdateGame      ; hero logic and/or a window draw step
     lda gamestate
     cmp #GS_BATTLE
-    beq @hide
+    bcs @hide           ; any battle state (>= GS_BATTLE): no field sprites
     jsr BuildOAM        ; field/dialog: draw the hero metasprite
     jmp @sync
 @hide:
-    jsr HideHero        ; battle screen: no field sprites
+    jsr HideHero
 @sync:
     jsr WaitFrame       ; NMI flushes the VRAM buffer + OAM while we wait
     jmp @loop
@@ -631,13 +635,24 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 .proc UpdateGame
     lda gamestate
     cmp #GS_OPENING
-    beq @opening
-    cmp #GS_DIALOG
-    beq @dialog
-    cmp #GS_CLOSING
-    beq @closing
-    cmp #GS_BATTLE
-    beq @battle
+    bne :+
+    jmp @opening
+:   cmp #GS_DIALOG
+    bne :+
+    jmp @dialog
+:   cmp #GS_CLOSING
+    bne :+
+    jmp @closing
+:   cmp #GS_BATTLE
+    bne :+
+    jmp @battle
+:   cmp #GS_ENEMYDIE
+    bne :+
+    jmp @enemydie
+:   cmp #GS_BATTLEWAIT
+    bne :+
+    jmp @battlewait
+:
 
     ; --- GS_FIELD ---
     jsr UpdateHero
@@ -676,7 +691,33 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     rts
 
 @battle:
-    ; Placeholder until Step 6 (stub battle + return).
+    ; Wait for the attack button.
+    lda pad1_new
+    and #BTN_A
+    beq @ret
+    lda #0
+    sta job_step
+    lda #GS_ENEMYDIE
+    sta gamestate
+    rts
+
+@enemydie:
+    ; Erase the enemy one tile-row per frame through the VRAM buffer.
+    jsr EraseEnemyRow
+    inc job_step
+    lda job_step
+    cmp #4
+    bcc @ret
+    lda #DIE_DELAY
+    sta battle_timer
+    lda #GS_BATTLEWAIT
+    sta gamestate
+    rts
+
+@battlewait:
+    dec battle_timer
+    bne @ret
+    jsr ExitBattle      ; cut back to the field at the prior position
     rts
 
 @opening:
@@ -824,6 +865,16 @@ close_src:
 winattr:
     .byte $FF, $FF, $FF, $FF   ; window region -> palette 3 in all quadrants
 
+; Enemy: 4x4 background tiles at nametable cols 14-17, rows 12-15.
+; Row low bytes: $2000 + (12+r)*32 + 14.
+enemy_lo:
+    .byte $8E, $AE, $CE, $EE
+enemy_nt:
+    .byte $1C, $1D, $1E, $1F
+    .byte $20, $21, $22, $23
+    .byte $24, $25, $26, $27
+    .byte $28, $29, $2A, $2B
+
 ; ----------------------------------------------------------------------------
 ; LoadPalette — write 32 palette entries from (ptr). Rendering must be off.
 ; ----------------------------------------------------------------------------
@@ -883,8 +934,9 @@ winattr:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; DrawBattle — fill nametable 0 with the blank tile (solid backdrop color from
-; the battle palette). The enemy is added in Step 6. Rendering must be off.
+; DrawBattle — blank the nametable to the battle backdrop, then draw the enemy
+; (4x4 background tiles, centered) and set its attribute to palette 1.
+; Rendering must be off.
 ; ----------------------------------------------------------------------------
 .proc DrawBattle
     bit PPUSTATUS
@@ -900,6 +952,100 @@ winattr:
     bne :-
     dex
     bne :-
+
+    ; Draw the enemy: 4 tile-rows of 4 tiles, from enemy_nt.
+    ldx #$00            ; index into enemy_nt (0..15)
+    ldy #$00            ; row counter (0..3)
+@row:
+    bit PPUSTATUS
+    lda #$21
+    sta PPUADDR
+    lda enemy_lo,y
+    sta PPUADDR
+    lda enemy_nt+0,x
+    sta PPUDATA
+    lda enemy_nt+1,x
+    sta PPUDATA
+    lda enemy_nt+2,x
+    sta PPUDATA
+    lda enemy_nt+3,x
+    sta PPUDATA
+    txa
+    clc
+    adc #4
+    tax
+    iny
+    cpy #4
+    bne @row
+
+    ; Enemy attribute bytes 27 and 28 ($23DB-$23DC) -> palette 1.
+    bit PPUSTATUS
+    lda #$23
+    sta PPUADDR
+    lda #$DB
+    sta PPUADDR
+    lda #%01010101
+    sta PPUDATA
+    sta PPUDATA
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; ExitBattle — cut back to the field at the hero's prior position (its entity
+; data was untouched during battle). Mirror of EnterBattle.
+; ----------------------------------------------------------------------------
+.proc ExitBattle
+    jsr WaitFrame
+    lda #$00
+    sta PPUCTRL         ; NMI off
+    sta PPUMASK         ; rendering off
+
+    jsr DrawField
+    lda #<pal_field
+    sta ptr
+    lda #>pal_field
+    sta ptr+1
+    jsr LoadPalette
+
+    ; Rebuild the hero sprite and push it before rendering resumes.
+    jsr BuildOAM
+    lda #$00
+    sta OAMADDR
+    lda #>OAM_BUF
+    sta OAMDMA
+
+    bit PPUSTATUS
+    lda #$00
+    sta PPUSCROLL
+    sta PPUSCROLL
+
+    lda #%10001000
+    sta PPUCTRL
+    lda #%00011110
+    sta PPUMASK
+
+    lda #GS_FIELD
+    sta gamestate
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; EraseEnemyRow — queue a VRAM packet blanking the 4 tiles of enemy row
+; job_step (0..3), erasing the background-drawn enemy over four frames.
+; ----------------------------------------------------------------------------
+.proc EraseEnemyRow
+    ldx job_step
+    lda #$21
+    sta VBUF            ; all enemy rows live in the $21xx nametable page
+    lda enemy_lo,x
+    sta VBUF+1
+    lda #$04
+    sta VBUF+2
+    lda #$00
+    sta VBUF+3
+    sta VBUF+4
+    sta VBUF+5
+    sta VBUF+6
     rts
 .endproc
 
@@ -990,8 +1136,8 @@ pal_battle:
     ; NOTE: the first entry of each sprite-palette row ($3F10/$14/$18/$1C) must
     ; match the backdrop ($11) because those addresses mirror $3F00/$04/$08/$0C;
     ; writing $0F there would clobber the backdrop to black.
-    .byte $11, $0F, $10, $30
-    .byte $11, $0F, $10, $30
+    .byte $11, $0F, $10, $30   ; 0: (unused on the blank screen)
+    .byte $11, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
     .byte $11, $0F, $10, $30
     .byte $11, $0F, $10, $30
     .byte $11, $16, $27, $30

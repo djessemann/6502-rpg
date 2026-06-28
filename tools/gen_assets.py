@@ -20,7 +20,8 @@ import os
 T_BLANK, T_GRASS, T_FLOWER, T_PATH, T_TREE, T_WALL, T_BUSH, T_WATER = range(8)
 T_NPC0 = 0x08          # NPC metasprite-as-background, tiles $08-$0B
 W_TL, W_T, W_TR, W_L, W_FILL, W_R, W_BL, W_B, W_BR = range(0x0C, 0x15)
-F_BASE = 0x15          # font glyph tiles start here
+F_BASE = 0x15          # font glyph tiles ($15-$1B)
+E_BASE = 0x1C          # enemy tiles ($1C-$2B): a 32x32 (4x4) background figure
 
 WATER = T_WATER
 
@@ -128,6 +129,31 @@ FONT = {
 }
 MESSAGE = "HELLO THERE!"   # one hardcoded line (<= 14 chars to fit the window)
 
+# ---------------------------------------------------------------------------
+# Enemy: authored at 16x16, doubled to 32x32, drawn as background tiles on the
+# battle screen (battle palette 1). Value 0 = transparent -> the blue battle
+# backdrop shows through, so the blob's silhouette blends cleanly.
+#   1 = body, 2 = shading, 3 = eyes/mouth (white).
+# ---------------------------------------------------------------------------
+ENEMY16 = [
+    "0000001111000000",
+    "0000011111100000",
+    "0000111111110000",
+    "0001111111111000",
+    "0011111111111100",
+    "0011311113111100",
+    "0111311113111110",
+    "0111111111111110",
+    "1111111111111111",
+    "1111111111111111",
+    "1111122221111111",
+    "1111111111111111",
+    "0111111111111110",
+    "0011111111111100",
+    "0000111111110000",
+    "0000000000000000",
+]
+
 # Where the NPC stands, in 16px grid cells (must match NPC_GX/GY in main.s).
 NPC_GX, NPC_GY = 6, 6
 
@@ -154,6 +180,25 @@ def split16(block):
         [r[0:8] for r in block[8:16]],
         [r[8:16] for r in block[8:16]],
     ]
+
+
+def double(block):
+    """2x-scale an NxN art block (each pixel becomes 2x2)."""
+    out = []
+    for row in block:
+        big = "".join(c * 2 for c in row)
+        out.append(big)
+        out.append(big)
+    return out
+
+
+def split_grid(block, n):
+    """Split an (8n)x(8n) art block into n*n 8x8 tiles, row-major."""
+    tiles = []
+    for tr in range(n):
+        for tc in range(n):
+            tiles.append([r[tc * 8:(tc + 1) * 8] for r in block[tr * 8:(tr + 1) * 8]])
+    return tiles
 
 
 def wintile(top=False, bottom=False, left=False, right=False):
@@ -199,6 +244,8 @@ def main():
     bg[W_BR] = wintile(bottom=True, right=True)
     for ch in font_chars:
         bg[font_id[ch]] = glyph(ch)
+    for i, tile in enumerate(split_grid(double(ENEMY16), 4)):
+        bg[E_BASE + i] = tile
 
     last_bg = max(bg)
     bg_bytes = []

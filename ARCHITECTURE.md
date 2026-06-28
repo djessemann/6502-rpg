@@ -18,6 +18,7 @@ Build: `make` → `6502rpg.nes` (NROM, 32KB PRG + 8KB CHR). Art: regenerate with
 | `src/main.s`          | Everything: boot, main loop, NMI, state machine, routines, palettes, tables. |
 | `src/chr.s`           | **Generated.** CHR-ROM tile data (BG table 0, hero table 1). |
 | `src/field.s`         | **Generated.** `fieldmap`, `fieldattr`, `winmap` (exported).  |
+| `src/tiles.inc`       | **Generated.** Tile-index constants (`HERO_*_TILE`, `TILE_NPC_LO/HI`, `ENEMY_TILE_BASE`). |
 | `tools/gen_assets.py` | Dev-time art source-of-truth → emits `chr.s` + `field.s`. Not in the `make` path. |
 | `nes.cfg`             | ld65 config (RAM/PRG/CHR layout, segments).                   |
 
@@ -46,14 +47,35 @@ Pattern table 0 (background, `$0000`):
 ```
 $00         blank
 $01-$07     grass, flower, path, tree, wall, bush, water
-$08-$0B     NPC (2x2, palette 2)
-$0C-$14     window frame (TL,T,TR,L,FILL,R,BL,B,BR)
-$15-$1B     font glyphs (! E H L O R T — only what "HELLO THERE!" needs)
-$1C-$2B     enemy (4x4 = 32x32, palette 1 in battle)
+$08-$17     NPC, 4 facings x 2x2 (down,up,left,right; palette 2)
+$18-$20     window frame (TL,T,TR,L,FILL,R,BL,B,BR)
+$21-$27     font glyphs (! E H L O R T — only what "HELLO THERE!" needs)
+$28-$37     enemy (4x4 = 32x32, palette 1 in battle)
 ```
 
-Pattern table 1 (sprites, `$1000`): `$00-$03` hero metasprite (2x2).
-`PPUCTRL` selects BG table 0 / sprite table 1 (`%10001000`).
+Pattern table 1 (sprites, `$1000`): hero, 3 facings x 2x2 — down `$00`, up `$04`,
+side `$08` (left = side flipped at draw time). `PPUCTRL` selects BG table 0 /
+sprite table 1 (`%10001000`).
+
+These ranges are emitted to **`src/tiles.inc`** by `gen_assets.py`
+(`HERO_*_TILE`, `TILE_NPC_LO/HI`, `ENEMY_TILE_BASE`); `main.s` includes it, so
+no tile numbers are hardcoded in the assembly.
+
+-----
+
+## Directional characters (the convention for all actors)
+
+Every character (player and NPC) tracks an `ent_dir` and is drawn facing it,
+from **three authored 16x16 views**: **down** (front), **up** (back), **side**
+(right-facing). The fourth facing (left) is a horizontal mirror of the side:
+
+- **Sprites** (hero, future moving NPCs): `BuildOAM` is table-driven by
+  `ent_dir` (`dir_tiles`, `dir_attr`, `slot_dx/dy`). Left reuses the side tiles
+  with the OAM **H-flip bit** ($40) set and the two tile **columns swapped**.
+  Adding a character = add its 3 views to pattern table 1 + a `dir_tiles` row.
+- **Background NPCs** (can't hardware-flip): `gen_assets.py` mirrors the side
+  art to make a 4th tile set, so the NPC has all four facings as BG tiles. A
+  stationary NPC's facing is the authored `NPC_FACING` in `gen_assets.py`.
 
 -----
 

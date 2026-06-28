@@ -11,6 +11,7 @@
 ;     but the call site exists).
 
 .include "nes.inc"
+.include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
 .import fieldmap, fieldattr, winmap
 
@@ -53,11 +54,10 @@ ST_MOVE    = 1
 
 MOVE_SPEED = 2          ; pixels/frame while sliding (16 / 2 = 8 frames per cell)
 
-; Solid (impassable) field tiles
+; Solid (impassable) field tiles. TILE_NPC_LO/HI come from tiles.inc.
 TILE_TREE  = $04
 TILE_WALL  = $05
 TILE_WATER = $07
-TILE_NPC_LO = $08       ; NPC tiles $08-$0B are solid
 
 ; Controller button bits (after the shift-in read order below)
 BTN_A      = %10000000
@@ -98,6 +98,11 @@ job_step:     .res 1   ; current window/enemy draw step
 draw_mode:    .res 1   ; 0 = opening (draw window), 1 = closing (restore field)
 vpkt_lo:      .res 1   ; packet being built: PPU address low / count
 vpkt_cnt:     .res 1
+
+; metasprite build scratch
+sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
+sprattr:      .res 1   ; OAM attribute byte for this facing
+oamoff:       .res 1   ; current OAM slot offset (slot * 4)
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -519,9 +524,9 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     beq @solid
     cmp #TILE_WATER
     beq @solid
-    cmp #TILE_NPC_LO    ; NPC occupies tiles $08-$0B (solid)
+    cmp #TILE_NPC_LO    ; any NPC facing tile is solid
     bcc @walk
-    cmp #TILE_NPC_LO + 4
+    cmp #TILE_NPC_HI + 1
     bcc @solid
 @walk:
     clc
@@ -561,62 +566,59 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     rts
 .endproc
 
-; BuildOAM — write the hero's 4-tile metasprite into shadow OAM (entries 0-3).
-; OAM byte order per sprite: Y, tile, attributes, X. Stored Y is screen-Y - 1.
+; BuildOAM — write the hero's directional 4-tile metasprite into shadow OAM
+; (entries 0-3). The tile set and flip are chosen by ent_dir: down/up use their
+; own art; left/right share the side art, with left horizontally flipped (OAM
+; attr bit 6) and its tile columns swapped. This is the reusable convention for
+; every sprite character. OAM byte order: Y, tile, attr, X. Stored Y = screenY-1.
 .proc BuildOAM
     ldx #HERO
+    lda ent_dir,x
+    asl a
+    asl a
+    sta sprbase         ; ent_dir * 4 = base index into dir_tiles
+    ldy ent_dir,x
+    lda dir_attr,y
+    sta sprattr
 
-    ; top-left
-    lda ent_py,x
+    ldx #$00            ; slot 0..3 (TL, TR, BL, BR)
+    lda #$00
+    sta oamoff          ; slot * 4
+@slot:
+    ; Y (screen) = hero py + slot_dy - 1
+    lda ent_py
+    clc
+    adc slot_dy,x
     sec
     sbc #1
-    sta oam+0
-    lda #$00
-    sta oam+1           ; sprite tile $00 (pattern table 1)
-    lda #$00
-    sta oam+2           ; palette 0, in front
-    lda ent_px,x
-    sta oam+3
+    ldy oamoff
+    sta oam,y
 
-    ; top-right
-    lda ent_py,x
-    sec
-    sbc #1
-    sta oam+4
-    lda #$01
-    sta oam+5
-    lda #$00
-    sta oam+6
-    lda ent_px,x
+    ; tile = dir_tiles[sprbase + slot]
+    txa
     clc
-    adc #8
-    sta oam+7
+    adc sprbase
+    tay
+    lda dir_tiles,y
+    ldy oamoff
+    sta oam+1,y
 
-    ; bottom-left  (screen-Y = py+8 -> stored py+7)
-    lda ent_py,x
-    clc
-    adc #7
-    sta oam+8
-    lda #$02
-    sta oam+9
-    lda #$00
-    sta oam+10
-    lda ent_px,x
-    sta oam+11
+    lda sprattr
+    sta oam+2,y
 
-    ; bottom-right
-    lda ent_py,x
+    ; X (screen) = hero px + slot_dx
+    lda ent_px
     clc
-    adc #7
-    sta oam+12
-    lda #$03
-    sta oam+13
-    lda #$00
-    sta oam+14
-    lda ent_px,x
+    adc slot_dx,x
+    sta oam+3,y
+
+    lda oamoff
     clc
-    adc #8
-    sta oam+15
+    adc #4
+    sta oamoff
+    inx
+    cpx #4
+    bne @slot
     rts
 .endproc
 
@@ -866,14 +868,24 @@ winattr:
     .byte $FF, $FF, $FF, $FF   ; window region -> palette 3 in all quadrants
 
 ; Enemy: 4x4 background tiles at nametable cols 14-17, rows 12-15.
-; Row low bytes: $2000 + (12+r)*32 + 14.
+; Row low bytes: $2000 + (12+r)*32 + 14. Tiles are ENEMY_TILE_BASE..+15.
 enemy_lo:
     .byte $8E, $AE, $CE, $EE
-enemy_nt:
-    .byte $1C, $1D, $1E, $1F
-    .byte $20, $21, $22, $23
-    .byte $24, $25, $26, $27
-    .byte $28, $29, $2A, $2B
+
+; Hero metasprite directional tables, indexed by ent_dir (UP,DOWN,LEFT,RIGHT).
+; Each row lists the tiles for screen slots TL,TR,BL,BR. LEFT reuses the side
+; (right-facing) art with columns swapped and the H-flip attribute set.
+dir_tiles:
+    .byte HERO_UP_TILE+0,   HERO_UP_TILE+1,   HERO_UP_TILE+2,   HERO_UP_TILE+3
+    .byte HERO_DOWN_TILE+0, HERO_DOWN_TILE+1, HERO_DOWN_TILE+2, HERO_DOWN_TILE+3
+    .byte HERO_SIDE_TILE+1, HERO_SIDE_TILE+0, HERO_SIDE_TILE+3, HERO_SIDE_TILE+2
+    .byte HERO_SIDE_TILE+0, HERO_SIDE_TILE+1, HERO_SIDE_TILE+2, HERO_SIDE_TILE+3
+dir_attr:
+    .byte $00, $00, $40, $00   ; LEFT = horizontal flip
+slot_dx:
+    .byte 0, 8, 0, 8
+slot_dy:
+    .byte 0, 0, 8, 8
 
 ; ----------------------------------------------------------------------------
 ; LoadPalette — write 32 palette entries from (ptr). Rendering must be off.
@@ -953,27 +965,27 @@ enemy_nt:
     dex
     bne :-
 
-    ; Draw the enemy: 4 tile-rows of 4 tiles, from enemy_nt.
-    ldx #$00            ; index into enemy_nt (0..15)
-    ldy #$00            ; row counter (0..3)
+    ; Draw the enemy: 4 tile-rows of 4 sequential tiles from ENEMY_TILE_BASE.
+    ldx #ENEMY_TILE_BASE   ; running tile id
+    ldy #$00               ; row counter (0..3)
 @row:
     bit PPUSTATUS
     lda #$21
     sta PPUADDR
     lda enemy_lo,y
     sta PPUADDR
-    lda enemy_nt+0,x
-    sta PPUDATA
-    lda enemy_nt+1,x
-    sta PPUDATA
-    lda enemy_nt+2,x
-    sta PPUDATA
-    lda enemy_nt+3,x
-    sta PPUDATA
     txa
-    clc
-    adc #4
-    tax
+    sta PPUDATA
+    inx
+    txa
+    sta PPUDATA
+    inx
+    txa
+    sta PPUDATA
+    inx
+    txa
+    sta PPUDATA
+    inx
     iny
     cpy #4
     bne @row

@@ -12,13 +12,28 @@
 
 .include "nes.inc"
 
-.import fieldmap, fieldattr
+.import fieldmap, fieldattr, winmap
 
 ; ----------------------------------------------------------------------------
 ; Constants
 ; ----------------------------------------------------------------------------
 MAX_ENT    = 8          ; entity array length (only the hero is used so far)
 HERO       = 0          ; entity index of the hero
+
+VBUF       = $0300      ; NMI VRAM buffer: one packet [hi, lo, count, data...]
+                        ; hi = $00 means "no update this frame"
+
+; Stationary NPC location, in 16px grid cells (must match tools/gen_assets.py)
+NPC_GX     = 6
+NPC_GY     = 6
+
+; High-level game states
+GS_FIELD   = 0          ; walking around
+GS_OPENING = 1          ; wiping the text window in
+GS_DIALOG  = 2          ; window shown, waiting to close
+GS_CLOSING = 3          ; wiping the text window out
+
+WIN_STEPS  = 9          ; 8 tile chunks + 1 attribute write
 
 ; Facing / movement directions
 DIR_UP     = 0
@@ -36,6 +51,7 @@ MOVE_SPEED = 2          ; pixels/frame while sliding (16 / 2 = 8 frames per cell
 TILE_TREE  = $04
 TILE_WALL  = $05
 TILE_WATER = $07
+TILE_NPC_LO = $08       ; NPC tiles $08-$0B are solid
 
 ; Controller button bits (after the shift-in read order below)
 BTN_A      = %10000000
@@ -67,6 +83,13 @@ cs_gx:        .res 1
 cs_gy:        .res 1
 mt_col:       .res 1
 mt_row:       .res 1
+
+; dialog / window state (main-thread use only)
+gamestate:    .res 1   ; GS_*
+job_step:     .res 1   ; current window draw step (0..WIN_STEPS-1)
+draw_mode:    .res 1   ; 0 = opening (draw window), 1 = closing (restore field)
+vpkt_lo:      .res 1   ; packet being built: PPU address low / count
+vpkt_cnt:     .res 1
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -150,9 +173,10 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 .proc MAIN
 @loop:
     jsr ReadInput
-    jsr UpdateHero
+    jsr VBufClear       ; default: no nametable update this frame
+    jsr UpdateGame      ; hero logic and/or a window draw step
     jsr BuildOAM
-    jsr WaitFrame       ; NMI flushes OAM/PPU while we wait
+    jsr WaitFrame       ; NMI flushes the VRAM buffer + OAM while we wait
     jmp @loop
 .endproc
 
@@ -180,7 +204,23 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     lda #>OAM_BUF
     sta OAMDMA
 
-    ; Flush the VRAM buffer here in a later step; nothing buffered yet.
+    ; Flush the VRAM buffer: a single packet [hi, lo, count, data...].
+    ; hi = $00 marks an empty buffer (no update this frame). Kept small enough
+    ; (<= ~8 bytes) that the copy fits inside vblank alongside OAM DMA.
+    lda VBUF
+    beq @noflush
+    sta PPUADDR
+    lda VBUF+1
+    sta PPUADDR
+    ldx VBUF+2
+    ldy #0
+@flush:
+    lda VBUF+3,y
+    sta PPUDATA
+    iny
+    dex
+    bne @flush
+@noflush:
 
     ; Reset scroll after any potential $2006 write this frame.
     bit PPUSTATUS
@@ -231,6 +271,9 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     sta ent_dir,x
     lda #ST_IDLE
     sta ent_state,x
+
+    lda #GS_FIELD
+    sta gamestate
     rts
 .endproc
 
@@ -456,6 +499,11 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     beq @solid
     cmp #TILE_WATER
     beq @solid
+    cmp #TILE_NPC_LO    ; NPC occupies tiles $08-$0B (solid)
+    bcc @walk
+    cmp #TILE_NPC_LO + 4
+    bcc @solid
+@walk:
     clc
     rts
 @solid:
@@ -553,6 +601,190 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 .endproc
 
 ; ----------------------------------------------------------------------------
+; VBufClear — mark the VRAM buffer empty for this frame.
+; ----------------------------------------------------------------------------
+.proc VBufClear
+    lda #$00
+    sta VBUF            ; hi = 0 => NMI flush does nothing
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; UpdateGame — top-level state machine for field walking vs. the text window.
+; ----------------------------------------------------------------------------
+.proc UpdateGame
+    lda gamestate
+    cmp #GS_OPENING
+    beq @opening
+    cmp #GS_DIALOG
+    beq @dialog
+    cmp #GS_CLOSING
+    beq @closing
+
+    ; --- GS_FIELD ---
+    jsr UpdateHero
+    lda pad1_new
+    and #BTN_A
+    beq @ret
+    ldx #HERO
+    lda ent_state,x     ; only interact when grid-aligned
+    cmp #ST_IDLE
+    bne @ret
+    jsr FacingNPC       ; carry set if adjacent to and facing the NPC
+    bcc @ret
+    lda #0
+    sta job_step
+    lda #GS_OPENING
+    sta gamestate
+@ret:
+    rts
+
+@opening:
+    lda #0              ; draw mode = opening
+    sta draw_mode
+    jsr DrawStep
+    inc job_step
+    lda job_step
+    cmp #WIN_STEPS
+    bcc @ret2
+    lda #GS_DIALOG
+    sta gamestate
+@ret2:
+    rts
+
+@dialog:
+    lda pad1_new
+    and #BTN_A
+    beq @ret3
+    lda #0
+    sta job_step
+    lda #GS_CLOSING
+    sta gamestate
+@ret3:
+    rts
+
+@closing:
+    lda #1              ; draw mode = closing (restore field)
+    sta draw_mode
+    jsr DrawStep
+    inc job_step
+    lda job_step
+    cmp #WIN_STEPS
+    bcc @ret4
+    lda #GS_FIELD
+    sta gamestate
+@ret4:
+    rts
+.endproc
+
+; FacingNPC — carry set if the cell the hero faces is the NPC's cell.
+; X = HERO on entry.
+.proc FacingNPC
+    lda ent_gx,x
+    sta newgx
+    lda ent_gy,x
+    sta newgy
+    lda ent_dir,x
+    cmp #DIR_UP
+    bne @nu
+    dec newgy
+    jmp @cmp
+@nu:
+    cmp #DIR_DOWN
+    bne @nd
+    inc newgy
+    jmp @cmp
+@nd:
+    cmp #DIR_LEFT
+    bne @nl
+    dec newgx
+    jmp @cmp
+@nl:
+    inc newgx           ; DIR_RIGHT
+@cmp:
+    lda newgx
+    cmp #NPC_GX
+    bne @no
+    lda newgy
+    cmp #NPC_GY
+    bne @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+; DrawStep — build one VRAM packet for window step job_step. draw_mode selects
+; the opening (window) or closing (field-restore) source table.
+.proc DrawStep
+    ldx job_step
+    lda step_hi,x
+    sta VBUF
+    lda step_lo,x
+    sta vpkt_lo
+    lda step_cnt,x
+    sta vpkt_cnt
+
+    txa
+    asl a
+    tay                 ; Y = step * 2 (word index)
+    lda draw_mode
+    bne @close
+    lda open_src,y
+    sta ptr
+    lda open_src+1,y
+    sta ptr+1
+    jmp @build
+@close:
+    lda close_src,y
+    sta ptr
+    lda close_src+1,y
+    sta ptr+1
+@build:
+    ; emit packet header + data into VBUF (VBUF hi already set above)
+    lda vpkt_lo
+    sta VBUF+1
+    lda vpkt_cnt
+    sta VBUF+2
+    ldy #0
+@copy:
+    lda (ptr),y
+    sta VBUF+3,y
+    iny
+    cpy vpkt_cnt
+    bne @copy
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; Window draw tables (9 steps: 8 tile chunks of 8 + 1 attribute write of 4).
+; All target nametable 0 ($23xx) / its attribute table ($23F2).
+; ----------------------------------------------------------------------------
+.segment "RODATA"
+step_hi:
+    .byte $23, $23, $23, $23, $23, $23, $23, $23, $23
+step_lo:
+    .byte $08, $10, $28, $30, $48, $50, $68, $70, $F2
+step_cnt:
+    .byte 8, 8, 8, 8, 8, 8, 8, 8, 4
+
+; opening: source the window tilemap, then the window attribute bytes
+open_src:
+    .word winmap+0,  winmap+8,  winmap+16, winmap+24
+    .word winmap+32, winmap+40, winmap+48, winmap+56
+    .word winattr
+
+; closing: source the original field tiles under the window, then its attrs
+close_src:
+    .word fieldmap+776, fieldmap+784, fieldmap+808, fieldmap+816
+    .word fieldmap+840, fieldmap+848, fieldmap+872, fieldmap+880
+    .word fieldattr+50
+
+winattr:
+    .byte $FF, $FF, $FF, $FF   ; window region -> palette 3 in all quadrants
+
+; ----------------------------------------------------------------------------
 ; LoadPalette — write all 32 palette entries (rendering must be off).
 ; ----------------------------------------------------------------------------
 .proc LoadPalette
@@ -628,11 +860,11 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 ; ----------------------------------------------------------------------------
 .segment "RODATA"
 palette:
-    ; Background palettes (2 used by the field):
+    ; Background palettes:
     .byte $0F, $1A, $2A, $07   ; 0: ground  - greens + brown (grass/tree/path/wall)
     .byte $0F, $0C, $11, $21   ; 1: water   - teal/blue/light blue
-    .byte $0F, $1A, $2A, $07   ; 2: spare (= ground)
-    .byte $0F, $1A, $2A, $07   ; 3: spare (= ground)
+    .byte $0F, $11, $27, $30   ; 2: NPC     - blue robe, tan skin, white
+    .byte $0F, $30, $0F, $16   ; 3: window  - white paper, black ink
     ; Sprite palettes (seeded for later steps):
     .byte $0F, $16, $27, $30
     .byte $0F, $0C, $11, $30

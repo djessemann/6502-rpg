@@ -8,4 +8,7 @@ HERO_SIDE_TILE = $08
 ; Background tiles (pattern table 0).
 TILE_NPC_LO = $08   ; first NPC tile (all facings)
 TILE_NPC_HI = $17   ; last NPC tile (solid range)
-ENEMY_TILE_BASE = $28
+ENEMY_TILE_BASE = $5C
+
+; Text window: full-width box at nametable rows 20-27.
+WIN_STEPS = 34

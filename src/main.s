@@ -37,7 +37,10 @@ GS_BATTLE  = 4          ; battle: enemy shown, waiting for an attack
 GS_ENEMYDIE = 5         ; erasing the enemy tiles (one row per frame)
 GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
 
-WIN_STEPS  = 9          ; 8 tile chunks + 1 attribute write
+; WIN_STEPS comes from tiles.inc (window draw chunks). Window is a full-width
+; box at nametable rows 20-27; nametable base of row 20 = $2000 + 20*32 = $2280.
+WIN_NT_HI  = $22
+WIN_NT_LO  = $80        ; low byte of $2280
 
 ENC_STEPS  = 16         ; grid steps before an encounter fires
 DIE_DELAY  = 30         ; frames to wait after the enemy dies before returning
@@ -103,6 +106,8 @@ vpkt_cnt:     .res 1
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
 oamoff:       .res 1   ; current OAM slot offset (slot * 4)
+
+woff:         .res 1   ; window draw: tile offset / attribute offset scratch
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -798,34 +803,108 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     rts
 .endproc
 
-; DrawStep — build one VRAM packet for window step job_step. draw_mode selects
-; the opening (window) or closing (field-restore) source table.
+; DrawStep — build one VRAM packet for window draw chunk job_step (0..WIN_STEPS-1).
+; Chunks 0..31 are 8-tile slices of the 32x8 window (4 per row, 8 rows); chunks
+; 32-33 set/restore the two attribute rows. draw_mode 0=open (winmap/palette 3),
+; 1=close (restore field tiles/attributes). Addresses are computed, not tabled.
 .proc DrawStep
-    ldx job_step
-    lda step_hi,x
-    sta VBUF
-    lda step_lo,x
+    lda job_step
+    cmp #32
+    bcs @attr
+
+    ; ----- tile chunk: woff = (job_step>>2)*32 + (job_step&3)*8 -----
+    lda job_step
+    and #$03
+    asl a
+    asl a
+    asl a               ; column group * 8 -> 0,8,16,24
+    sta woff
+    lda job_step
+    lsr a
+    lsr a               ; row 0..7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a               ; row * 32
+    clc
+    adc woff
+    sta woff            ; offset within the window (0..248)
+
+    lda woff            ; nametable address = $2280 + woff
+    clc
+    adc #WIN_NT_LO
     sta vpkt_lo
-    lda step_cnt,x
+    lda #WIN_NT_HI
+    adc #0
+    sta VBUF
+    lda #8
     sta vpkt_cnt
 
-    txa
-    asl a
-    tay                 ; Y = step * 2 (word index)
     lda draw_mode
-    bne @close
-    lda open_src,y
+    bne @tile_close
+    lda #<winmap        ; open: source the window tilemap
+    clc
+    adc woff
     sta ptr
-    lda open_src+1,y
+    lda #>winmap
+    adc #0
     sta ptr+1
     jmp @build
-@close:
-    lda close_src,y
+@tile_close:
+    lda woff            ; close: source fieldmap + 640 + woff
+    clc
+    adc #$80
     sta ptr
-    lda close_src+1,y
+    lda #$02
+    adc #0
     sta ptr+1
+    lda ptr
+    clc
+    adc #<fieldmap
+    sta ptr
+    lda ptr+1
+    adc #>fieldmap
+    sta ptr+1
+    jmp @build
+
+@attr:
+    ; attribute chunk 32 -> $23E8 / fieldattr+40 ; 33 -> $23F0 / fieldattr+48
+    lda #$23
+    sta VBUF
+    lda #8
+    sta vpkt_cnt
+    lda job_step
+    cmp #33
+    beq @attr1
+    lda #$E8
+    sta vpkt_lo
+    lda #40
+    sta woff
+    jmp @attr_src
+@attr1:
+    lda #$F0
+    sta vpkt_lo
+    lda #48
+    sta woff
+@attr_src:
+    lda draw_mode
+    bne @attr_close
+    lda #<winattr       ; open: palette 3 in all quadrants
+    sta ptr
+    lda #>winattr
+    sta ptr+1
+    jmp @build
+@attr_close:
+    lda #<fieldattr     ; close: restore original attributes
+    clc
+    adc woff
+    sta ptr
+    lda #>fieldattr
+    adc #0
+    sta ptr+1
+
 @build:
-    ; emit packet header + data into VBUF (VBUF hi already set above)
     lda vpkt_lo
     sta VBUF+1
     lda vpkt_cnt
@@ -840,32 +919,9 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     rts
 .endproc
 
-; ----------------------------------------------------------------------------
-; Window draw tables (9 steps: 8 tile chunks of 8 + 1 attribute write of 4).
-; All target nametable 0 ($23xx) / its attribute table ($23F2).
-; ----------------------------------------------------------------------------
 .segment "RODATA"
-step_hi:
-    .byte $23, $23, $23, $23, $23, $23, $23, $23, $23
-step_lo:
-    .byte $08, $10, $28, $30, $48, $50, $68, $70, $F2
-step_cnt:
-    .byte 8, 8, 8, 8, 8, 8, 8, 8, 4
-
-; opening: source the window tilemap, then the window attribute bytes
-open_src:
-    .word winmap+0,  winmap+8,  winmap+16, winmap+24
-    .word winmap+32, winmap+40, winmap+48, winmap+56
-    .word winattr
-
-; closing: source the original field tiles under the window, then its attrs
-close_src:
-    .word fieldmap+776, fieldmap+784, fieldmap+808, fieldmap+816
-    .word fieldmap+840, fieldmap+848, fieldmap+872, fieldmap+880
-    .word fieldattr+50
-
 winattr:
-    .byte $FF, $FF, $FF, $FF   ; window region -> palette 3 in all quadrants
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; palette 3, all quadrants
 
 ; Enemy: 4x4 background tiles at nametable cols 14-17, rows 12-15.
 ; Row low bytes: $2000 + (12+r)*32 + 14. Tiles are ENEMY_TILE_BASE..+15.

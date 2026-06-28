@@ -24,8 +24,7 @@ import os
 T_BLANK, T_GRASS, T_FLOWER, T_PATH, T_TREE, T_WALL, T_BUSH, T_WATER = range(8)
 NPC_DOWN, NPC_UP, NPC_LEFT, NPC_RIGHT = 0x08, 0x0C, 0x10, 0x14   # 4 tiles each
 W_TL, W_T, W_TR, W_L, W_FILL, W_R, W_BL, W_B, W_BR = range(0x18, 0x21)
-F_BASE = 0x21          # font glyph tiles
-E_BASE = 0x28          # enemy tiles: a 32x32 (4x4) background figure
+F_BASE = 0x21          # font glyph tiles ($21 onward); enemy tiles follow them
 
 # Sprite tile indices (pattern table 1). A sprite character gets three authored
 # facings; "left" is the side art with the OAM horizontal-flip bit set at draw
@@ -200,26 +199,85 @@ NPC_VIEWS = {
 NPC_FACING = "down"
 
 # ---------------------------------------------------------------------------
-# Text window: white box, black border + text (palette 3: 1=white, 2=black).
-# Font glyphs are '#'=ink (value 2) on '.'=paper (value 1).
+# Text window (Dragon-Warrior style): black box, white double-line border and
+# white text. Palette 3 is color0 = black (the universal backdrop $0F),
+# color1 = white ($30). So glyphs/frame are '#' = white ink (value 1) on
+# '.' = black (value 0). 5x7 cell, baseline on row 6, descenders on row 7.
 # ---------------------------------------------------------------------------
 FONT = {
-    "H": ["........", ".#...#..", ".#...#..", ".#####..",
-          ".#...#..", ".#...#..", ".#...#..", "........"],
-    "E": ["........", ".#####..", ".#......", ".####...",
-          ".#......", ".#......", ".#####..", "........"],
-    "L": ["........", ".#......", ".#......", ".#......",
-          ".#......", ".#......", ".#####..", "........"],
-    "O": ["........", "..###...", ".#...#..", ".#...#..",
-          ".#...#..", ".#...#..", "..###...", "........"],
-    "T": ["........", ".#####..", "...#....", "...#....",
-          "...#....", "...#....", "...#....", "........"],
-    "R": ["........", ".####...", ".#...#..", ".####...",
-          ".#.#....", ".#..#...", ".#...#..", "........"],
-    "!": ["...#....", "...#....", "...#....", "...#....",
-          "...#....", "........", "...#....", "........"],
+    " ": ["........"] * 8,
+    # lowercase
+    "a": ["........", "........", ".###....", "....#...", ".####...", "#...#...", ".####...", "........"],
+    "b": ["#.......", "#.......", "#.##....", "##..#...", "#...#...", "#...#...", "##.#....", "........"],
+    "c": ["........", "........", ".###....", "#...#...", "#.......", "#...#...", ".###....", "........"],
+    "d": ["....#...", "....#...", ".##.#...", "#..##...", "#...#...", "#...#...", ".##.#...", "........"],
+    "e": ["........", "........", ".###....", "#...#...", "#####...", "#.......", ".###....", "........"],
+    "f": ["..##....", ".#..#...", ".#......", "###.....", ".#......", ".#......", ".#......", "........"],
+    "g": ["........", "........", ".##.#...", "#..#....", "#..#....", ".###....", "...#....", ".##....."],
+    "h": ["#.......", "#.......", "#.##....", "##..#...", "#...#...", "#...#...", "#...#...", "........"],
+    "i": ["..#.....", "........", ".##.....", "..#.....", "..#.....", "..#.....", ".###....", "........"],
+    "j": ["...#....", "........", "..##....", "...#....", "...#....", "#..#....", ".##.....", "........"],
+    "k": ["#.......", "#.......", "#..#....", "#.#.....", "##......", "#.#.....", "#..#....", "........"],
+    "l": [".##.....", "..#.....", "..#.....", "..#.....", "..#.....", "..#.....", ".###....", "........"],
+    "m": ["........", "........", "##.#....", "#.#.#...", "#.#.#...", "#.#.#...", "#.#.#...", "........"],
+    "n": ["........", "........", "#.##....", "##..#...", "#...#...", "#...#...", "#...#...", "........"],
+    "o": ["........", "........", ".###....", "#...#...", "#...#...", "#...#...", ".###....", "........"],
+    "p": ["........", "........", "#.##....", "##..#...", "#...#...", "##.#....", "#.......", "#......."],
+    "q": ["........", "........", ".##.#...", "#..##...", "#...#...", ".##.#...", "....#...", "....#..."],
+    "r": ["........", "........", "#.##....", "##..#...", "#.......", "#.......", "#.......", "........"],
+    "s": ["........", "........", ".####...", "#.......", ".###....", "....#...", "####....", "........"],
+    "t": [".#......", ".#......", "###.....", ".#......", ".#......", ".#..#...", "..##....", "........"],
+    "u": ["........", "........", "#...#...", "#...#...", "#...#...", "#..##...", ".##.#...", "........"],
+    "v": ["........", "........", "#...#...", "#...#...", "#...#...", ".#.#....", "..#.....", "........"],
+    "w": ["........", "........", "#.#.#...", "#.#.#...", "#.#.#...", "#.#.#...", ".#.#....", "........"],
+    "x": ["........", "........", "#...#...", ".#.#....", "..#.....", ".#.#....", "#...#...", "........"],
+    "y": ["........", "........", "#...#...", "#...#...", "#..##...", ".##.#...", "....#...", ".###...."],
+    "z": ["........", "........", "#####...", "...#....", "..#.....", ".#......", "#####...", "........"],
+    # uppercase
+    "A": ["........", ".###....", "#...#...", "#...#...", "#####...", "#...#...", "#...#...", "........"],
+    "B": ["........", "####....", "#...#...", "####....", "#...#...", "#...#...", "####....", "........"],
+    "C": ["........", ".###....", "#...#...", "#.......", "#.......", "#...#...", ".###....", "........"],
+    "D": ["........", "###.....", "#..#....", "#...#...", "#...#...", "#..#....", "###.....", "........"],
+    "E": ["........", "#####...", "#.......", "###.....", "#.......", "#.......", "#####...", "........"],
+    "F": ["........", "#####...", "#.......", "###.....", "#.......", "#.......", "#.......", "........"],
+    "G": ["........", ".###....", "#...#...", "#.......", "#.##....", "#...#...", ".###....", "........"],
+    "H": ["........", "#...#...", "#...#...", "#####...", "#...#...", "#...#...", "#...#...", "........"],
+    "I": ["........", ".###....", "..#.....", "..#.....", "..#.....", "..#.....", ".###....", "........"],
+    "J": ["........", "..###...", "...#....", "...#....", "...#....", "#..#....", ".##.....", "........"],
+    "K": ["........", "#...#...", "#..#....", "###.....", "#.#.....", "#..#....", "#...#...", "........"],
+    "L": ["........", "#.......", "#.......", "#.......", "#.......", "#.......", "#####...", "........"],
+    "M": ["........", "#...#...", "##.##...", "#.#.#...", "#...#...", "#...#...", "#...#...", "........"],
+    "N": ["........", "#...#...", "##..#...", "#.#.#...", "#..##...", "#...#...", "#...#...", "........"],
+    "O": ["........", ".###....", "#...#...", "#...#...", "#...#...", "#...#...", ".###....", "........"],
+    "P": ["........", "####....", "#...#...", "#...#...", "####....", "#.......", "#.......", "........"],
+    "Q": ["........", ".###....", "#...#...", "#...#...", "#.#.#...", "#..#....", ".##.#...", "........"],
+    "R": ["........", "####....", "#...#...", "#...#...", "####....", "#.#.....", "#..#....", "........"],
+    "S": ["........", ".####...", "#.......", ".###....", "....#...", "....#...", "####....", "........"],
+    "T": ["........", "#####...", "..#.....", "..#.....", "..#.....", "..#.....", "..#.....", "........"],
+    "U": ["........", "#...#...", "#...#...", "#...#...", "#...#...", "#...#...", ".###....", "........"],
+    "V": ["........", "#...#...", "#...#...", "#...#...", "#...#...", ".#.#....", "..#.....", "........"],
+    "W": ["........", "#...#...", "#...#...", "#...#...", "#.#.#...", "##.##...", "#...#...", "........"],
+    "X": ["........", "#...#...", ".#.#....", "..#.....", "..#.....", ".#.#....", "#...#...", "........"],
+    "Y": ["........", "#...#...", "#...#...", ".#.#....", "..#.....", "..#.....", "..#.....", "........"],
+    "Z": ["........", "#####...", "...#....", "..#.....", ".#......", "#.......", "#####...", "........"],
+    # punctuation
+    ".": ["........", "........", "........", "........", "........", ".##.....", ".##.....", "........"],
+    ",": ["........", "........", "........", "........", "........", ".##.....", ".##.....", ".#......"],
+    "'": [".#......", ".#......", ".#......", "........", "........", "........", "........", "........"],
+    "!": ["..#.....", "..#.....", "..#.....", "..#.....", "..#.....", "........", "..#.....", "........"],
+    "?": [".###....", "#...#...", "...#....", "..#.....", "..#.....", "........", "..#.....", "........"],
+    "-": ["........", "........", "........", ".###....", "........", "........", "........", "........"],
 }
-MESSAGE = "HELLO THERE!"   # one hardcoded line (<= 14 chars to fit the window)
+
+# Sample shown until the runtime text engine lands (next step). Up to 5 lines
+# of <= 28 chars, matching the large bottom box interior.
+SAMPLE_LINES = [
+    "Erdrick, listen now to my",
+    "words.",
+    "",
+    "In ages past, a hero sealed",
+    "the demon with a Ball of",
+]
 
 # ---------------------------------------------------------------------------
 # Enemy: authored at 16x16, doubled to 32x32, drawn as background tiles on the
@@ -279,6 +337,11 @@ def mirror_h(block):
     return [row[::-1] for row in block]
 
 
+def mirror_v(block):
+    """Vertically mirror an art block."""
+    return block[::-1]
+
+
 def double(block):
     """2x-scale an NxN art block (each pixel becomes 2x2)."""
     out = []
@@ -298,24 +361,50 @@ def split_grid(block, n):
     return tiles
 
 
-def wintile(top=False, bottom=False, left=False, right=False):
-    """Window frame tile: white (1) fill with black (2) on the named edges."""
-    g = [[1] * 8 for _ in range(8)]
-    for i in range(8):
-        if top:
-            g[0][i] = 2
-        if bottom:
-            g[7][i] = 2
-        if left:
-            g[i][0] = 2
-        if right:
-            g[i][7] = 2
-    return ["".join(str(v) for v in row) for row in g]
+# Dragon-Warrior-style frame: black box with a white double line near the edge,
+# rounded corners. '#' = white (value 1), '.' = black (value 0). Only the
+# top-left corner and the top/left edges are authored; the rest are mirrored.
+WIN_TL_ART = [
+    "........",
+    "........",
+    "..######",
+    "..#.....",
+    "..#.####",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+]
+WIN_T_ART = [
+    "........",
+    "........",
+    "########",
+    "........",
+    "########",
+    "........",
+    "........",
+    "........",
+]
+WIN_L_ART = [
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+    "..#.#...",
+]
+WIN_FILL_ART = ["........"] * 8
+
+
+def to_digits(art):
+    """Convert '#'/'.' art into the digit strings to_chr() expects (1=white)."""
+    return ["".join("1" if c == "#" else "0" for c in row) for row in art]
 
 
 def glyph(ch):
-    """Font tile: '#'=ink(2) on '.'=paper(1)."""
-    return ["".join("2" if c == "#" else "1" for c in row) for row in FONT[ch]]
+    """Font tile: '#' = white ink (value 1) on '.' = black (value 0)."""
+    return to_digits(FONT[ch])
 
 
 def main():
@@ -338,19 +427,24 @@ def main():
     for base, block in npc_blocks.items():
         for i, tile in enumerate(split16(block)):
             bg[base + i] = tile
-    bg[W_TL] = wintile(top=True, left=True)
-    bg[W_T] = wintile(top=True)
-    bg[W_TR] = wintile(top=True, right=True)
-    bg[W_L] = wintile(left=True)
-    bg[W_FILL] = wintile()
-    bg[W_R] = wintile(right=True)
-    bg[W_BL] = wintile(bottom=True, left=True)
-    bg[W_B] = wintile(bottom=True)
-    bg[W_BR] = wintile(bottom=True, right=True)
+    # Window frame: author TL + top/left edges + fill; mirror for the rest.
+    tl = to_digits(WIN_TL_ART)
+    top = to_digits(WIN_T_ART)
+    left = to_digits(WIN_L_ART)
+    bg[W_TL] = tl
+    bg[W_T] = top
+    bg[W_TR] = mirror_h(tl)
+    bg[W_L] = left
+    bg[W_FILL] = to_digits(WIN_FILL_ART)
+    bg[W_R] = mirror_h(left)
+    bg[W_BL] = mirror_v(tl)
+    bg[W_B] = mirror_v(top)
+    bg[W_BR] = mirror_v(mirror_h(tl))
     for ch in font_chars:
         bg[font_id[ch]] = glyph(ch)
+    e_base = F_BASE + len(font_chars)          # enemy tiles follow the font
     for i, tile in enumerate(split_grid(double(ENEMY16), 4)):
-        bg[E_BASE + i] = tile
+        bg[e_base + i] = tile
 
     last_bg = max(bg)
     bg_bytes = []
@@ -441,17 +535,26 @@ def main():
     flat = [m[y][x] for y in range(H) for x in range(W)]
     attr = attr_table(m)
 
-    # --- build the 16x4 window tilemap (text embedded), rows top-to-bottom ---
-    interior = " " + MESSAGE + " "
-    interior = interior + " " * (14 - len(interior))   # pad to 14 wide
-    assert len(interior) == 14, "MESSAGE too long for the window"
-    text_row = [W_L] + [W_FILL if c == " " else font_id[c] for c in interior] + [W_R]
-    winmap = (
-        [W_TL] + [W_T] * 14 + [W_TR] +
-        text_row +
-        [W_L] + [W_FILL] * 14 + [W_R] +
-        [W_BL] + [W_B] * 14 + [W_BR]
-    )
+    # --- build the large bottom window tilemap: 32 wide x 8 tall ---
+    # Full screen width (so the palette-3 attribute band aligns cleanly), with a
+    # 1-tile black margin (W_FILL) inside the edges, the double-line frame, and
+    # a 28x5 text interior. Drawn at nametable rows 20-27.
+    IN_W, IN_H = 28, 5
+    lines = (list(SAMPLE_LINES) + [""] * IN_H)[:IN_H]
+
+    def interior_row(s):
+        cells = [W_FILL if c == " " else font_id[c] for c in s[:IN_W]]
+        cells += [W_FILL] * (IN_W - len(cells))
+        return [W_FILL, W_L] + cells + [W_R, W_FILL]
+
+    winmap = [W_FILL] * 32                                   # row 0: top margin
+    winmap += [W_FILL, W_TL] + [W_T] * IN_W + [W_TR, W_FILL]  # row 1: top frame
+    for r in range(IN_H):                                    # rows 2-6: text
+        winmap += interior_row(lines[r])
+    winmap += [W_FILL, W_BL] + [W_B] * IN_W + [W_BR, W_FILL]  # row 7: bottom
+
+    # window draw steps: 32 tile chunks of 8 + 2 attribute chunks of 8
+    win_steps = 32 * 8 // 8 + 2
 
     with open(os.path.join(src, "field.s"), "w") as f:
         f.write("; field.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
@@ -460,7 +563,7 @@ def main():
         f.write('.segment "RODATA"\n')
         f.write(fmt_bytes("fieldmap", flat, 32) + "\n\n")
         f.write(fmt_bytes("fieldattr", attr, 16) + "\n\n")
-        f.write(fmt_bytes("winmap", winmap, 16) + "\n")
+        f.write(fmt_bytes("winmap", winmap, 32) + "\n")
 
     # tile-index constants consumed by main.s (so nothing is hardcoded there)
     with open(os.path.join(src, "tiles.inc"), "w") as f:
@@ -472,7 +575,9 @@ def main():
         f.write("; Background tiles (pattern table 0).\n")
         f.write(f"TILE_NPC_LO = ${NPC_DOWN:02X}   ; first NPC tile (all facings)\n")
         f.write(f"TILE_NPC_HI = ${NPC_RIGHT + 3:02X}   ; last NPC tile (solid range)\n")
-        f.write(f"ENEMY_TILE_BASE = ${E_BASE:02X}\n")
+        f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n\n")
+        f.write("; Text window: full-width box at nametable rows 20-27.\n")
+        f.write(f"WIN_STEPS = {win_steps}\n")
 
     # console preview
     glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "T",

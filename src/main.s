@@ -15,17 +15,76 @@
 .import fieldmap, fieldattr
 
 ; ----------------------------------------------------------------------------
+; Constants
+; ----------------------------------------------------------------------------
+MAX_ENT    = 8          ; entity array length (only the hero is used so far)
+HERO       = 0          ; entity index of the hero
+
+; Facing / movement directions
+DIR_UP     = 0
+DIR_DOWN   = 1
+DIR_LEFT   = 2
+DIR_RIGHT  = 3
+
+; Entity states
+ST_IDLE    = 0
+ST_MOVE    = 1
+
+MOVE_SPEED = 2          ; pixels/frame while sliding (16 / 2 = 8 frames per cell)
+
+; Solid (impassable) field tiles
+TILE_TREE  = $04
+TILE_WALL  = $05
+TILE_WATER = $07
+
+; Controller button bits (after the shift-in read order below)
+BTN_A      = %10000000
+BTN_B      = %01000000
+BTN_SELECT = %00100000
+BTN_START  = %00010000
+BTN_UP     = %00001000
+BTN_DOWN   = %00000100
+BTN_LEFT   = %00000010
+BTN_RIGHT  = %00000001
+
+; ----------------------------------------------------------------------------
 ; Zeropage variables
 ; ----------------------------------------------------------------------------
 .segment "ZEROPAGE"
 frame_count:  .res 1   ; incremented by NMI; main loop syncs against it
-ptr:          .res 2   ; general 16-bit pointer (init-time use)
+ptr:          .res 2   ; general 16-bit pointer
+
+pad1:         .res 1   ; controller 1, buttons held this frame
+pad1_prev:    .res 1   ; buttons held last frame
+pad1_new:     .res 1   ; buttons newly pressed this frame
+
+; scratch for movement / collision (main-thread use only)
+newgx:        .res 1
+newgy:        .res 1
+tpx:          .res 1
+tpy:          .res 1
+cs_gx:        .res 1
+cs_gy:        .res 1
+mt_col:       .res 1
+mt_row:       .res 1
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
 ; ----------------------------------------------------------------------------
 .segment "OAMBUF"
 oam:          .res 256
+
+; ----------------------------------------------------------------------------
+; Entities — struct-of-arrays, indexed by entity number (X register).
+; ----------------------------------------------------------------------------
+.segment "BSS"
+ent_gx:    .res MAX_ENT   ; grid cell X (16px cells, 0..15)
+ent_gy:    .res MAX_ENT   ; grid cell Y (0..14)
+ent_px:    .res MAX_ENT   ; sprite pixel X (top-left)
+ent_py:    .res MAX_ENT   ; sprite pixel Y (top-left)
+ent_dir:   .res MAX_ENT   ; facing direction
+ent_state: .res MAX_ENT   ; ST_IDLE / ST_MOVE
+ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 
 ; ----------------------------------------------------------------------------
 ; RESET
@@ -73,13 +132,13 @@ oam:          .res 256
     ; Rendering is still off here, so direct VRAM writes are safe.
     jsr LoadPalette
     jsr DrawField
+    jsr InitGame
 
-    ; Enable NMI; background pattern table 0, sprite pattern table 0.
-    lda #%10000000
+    ; Enable NMI; background pattern table 0, sprite pattern table 1.
+    lda #%10001000
     sta PPUCTRL
-    ; Show background (and its leftmost 8px). Sprites stay off until we have a
-    ; hero to draw; OAM DMA still runs harmlessly each frame.
-    lda #%00001010
+    ; Show background and sprites, including their leftmost 8px columns.
+    lda #%00011110
     sta PPUMASK
 
     ; fall through into the main loop
@@ -90,8 +149,10 @@ oam:          .res 256
 ; ----------------------------------------------------------------------------
 .proc MAIN
 @loop:
-    jsr WaitFrame
-    ; ---- game logic goes here (none yet for Step 1: Boot) ----
+    jsr ReadInput
+    jsr UpdateHero
+    jsr BuildOAM
+    jsr WaitFrame       ; NMI flushes OAM/PPU while we wait
     jmp @loop
 .endproc
 
@@ -126,7 +187,7 @@ oam:          .res 256
     lda #$00
     sta PPUSCROLL
     sta PPUSCROLL
-    lda #%10000000
+    lda #%10001000
     sta PPUCTRL
 
     jsr SoundTick       ; called every frame, including lag frames (stub)
@@ -149,6 +210,345 @@ oam:          .res 256
 ; Sound tick — stubbed for the slice; the call site is what matters.
 ; ----------------------------------------------------------------------------
 .proc SoundTick
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; InitGame — place the hero on the field. Other entity slots stay zeroed (RAM
+; was cleared at reset), i.e. idle at cell (0,0); they are unused for now.
+; ----------------------------------------------------------------------------
+.proc InitGame
+    ldx #HERO
+    lda #4
+    sta ent_gx,x        ; start on open grass, left-of-center
+    lda #8
+    sta ent_gy,x
+    lda #4 * 16
+    sta ent_px,x        ; pixel position = cell * 16
+    lda #8 * 16
+    sta ent_py,x
+    lda #DIR_DOWN
+    sta ent_dir,x
+    lda #ST_IDLE
+    sta ent_state,x
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; ReadInput — strobe controller 1, shift in 8 buttons, derive newly-pressed.
+; ----------------------------------------------------------------------------
+.proc ReadInput
+    lda pad1
+    sta pad1_prev
+
+    lda #$01
+    sta JOYPAD1         ; strobe on
+    lda #$00
+    sta JOYPAD1         ; strobe off; serial shift begins
+
+    ldx #8
+@read:
+    lda JOYPAD1
+    lsr a               ; button state -> carry
+    rol pad1            ; shift into pad1 (first read = A -> ends in bit7)
+    dex
+    bne @read
+
+    ; pad1_new = buttons set now that were not set last frame
+    lda pad1_prev
+    eor #$FF
+    and pad1
+    sta pad1_new
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; UpdateHero — idle: read the d-pad and try to start a step. Moving: slide.
+; ----------------------------------------------------------------------------
+.proc UpdateHero
+    ldx #HERO
+    lda ent_state,x
+    cmp #ST_MOVE
+    beq @moving
+
+    ; idle: pick a direction from the held d-pad (up > down > left > right)
+    lda pad1
+    and #BTN_UP
+    beq @notup
+    ldy #DIR_UP
+    jmp @try
+@notup:
+    lda pad1
+    and #BTN_DOWN
+    beq @notdown
+    ldy #DIR_DOWN
+    jmp @try
+@notdown:
+    lda pad1
+    and #BTN_LEFT
+    beq @notleft
+    ldy #DIR_LEFT
+    jmp @try
+@notleft:
+    lda pad1
+    and #BTN_RIGHT
+    beq @done
+    ldy #DIR_RIGHT
+@try:
+    tya
+    sta ent_dir,x       ; face that way even if the step is blocked
+    jsr TryStep
+    rts
+
+@moving:
+    jsr StepMove
+@done:
+    rts
+.endproc
+
+; Attempt to start a step in ent_dir,x. Commits the new cell (and enters the
+; sliding state) only if the destination cell is in-bounds and not solid.
+; X = entity index.
+.proc TryStep
+    lda ent_gx,x
+    sta newgx
+    lda ent_gy,x
+    sta newgy
+
+    lda ent_dir,x
+    cmp #DIR_UP
+    bne @nu
+    dec newgy
+    jmp @check
+@nu:
+    cmp #DIR_DOWN
+    bne @nd
+    inc newgy
+    jmp @check
+@nd:
+    cmp #DIR_LEFT
+    bne @nl
+    dec newgx
+    jmp @check
+@nl:
+    inc newgx           ; DIR_RIGHT
+
+@check:
+    ; bounds (unsigned: underflow wraps to a large value -> blocked)
+    lda newgx
+    cmp #16
+    bcs @blocked
+    lda newgy
+    cmp #15
+    bcs @blocked
+
+    lda newgx
+    sta cs_gx
+    lda newgy
+    sta cs_gy
+    jsr CellSolid       ; carry set => solid
+    bcs @blocked
+
+    ; commit the move and begin the slide
+    lda newgx
+    sta ent_gx,x
+    lda newgy
+    sta ent_gy,x
+    lda #ST_MOVE
+    sta ent_state,x
+    lda #16
+    sta ent_timer,x
+@blocked:
+    rts
+.endproc
+
+; Slide the sprite toward its committed cell by MOVE_SPEED; finish when aligned.
+; X = entity index.
+.proc StepMove
+    lda ent_gx,x        ; target pixel x = gx * 16
+    asl a
+    asl a
+    asl a
+    asl a
+    sta tpx
+    lda ent_gy,x        ; target pixel y = gy * 16
+    asl a
+    asl a
+    asl a
+    asl a
+    sta tpy
+
+    lda ent_px,x
+    cmp tpx
+    beq @ydiff
+    bcc @xinc
+    sec
+    sbc #MOVE_SPEED
+    sta ent_px,x
+    jmp @ydiff
+@xinc:
+    clc
+    adc #MOVE_SPEED
+    sta ent_px,x
+
+@ydiff:
+    lda ent_py,x
+    cmp tpy
+    beq @tick
+    bcc @yinc
+    sec
+    sbc #MOVE_SPEED
+    sta ent_py,x
+    jmp @tick
+@yinc:
+    clc
+    adc #MOVE_SPEED
+    sta ent_py,x
+
+@tick:
+    lda ent_timer,x
+    sec
+    sbc #MOVE_SPEED
+    sta ent_timer,x
+    bne @done
+    lda #ST_IDLE
+    sta ent_state,x     ; aligned on the grid again
+@done:
+    rts
+.endproc
+
+; CellSolid — is the 16px grid cell (cs_gx,cs_gy) blocked? A cell spans a 2x2
+; block of 8px map tiles; it is solid if ANY of those four tiles is solid.
+; Returns carry set if solid. Preserves X.
+.proc CellSolid
+    lda cs_gx
+    asl a
+    sta mt_col          ; base map col = gx * 2
+    lda cs_gy
+    asl a
+    sta mt_row          ; base map row = gy * 2
+
+    jsr CheckTile       ; (col,   row)
+    bcs @solid
+    inc mt_col
+    jsr CheckTile       ; (col+1, row)
+    bcs @solid
+    inc mt_row
+    jsr CheckTile       ; (col+1, row+1)
+    bcs @solid
+    dec mt_col
+    jsr CheckTile       ; (col,   row+1)
+    bcs @solid
+    clc
+    rts
+@solid:
+    sec
+    rts
+.endproc
+
+; CheckTile — read map tile (mt_col,mt_row); carry set if it is solid.
+; Preserves X.
+.proc CheckTile
+    jsr MapTile
+    cmp #TILE_TREE
+    beq @solid
+    cmp #TILE_WALL
+    beq @solid
+    cmp #TILE_WATER
+    beq @solid
+    clc
+    rts
+@solid:
+    sec
+    rts
+.endproc
+
+; MapTile — fetch fieldmap[mt_row*32 + mt_col] into A. Preserves X.
+.proc MapTile
+    lda #0
+    sta ptr+1
+    lda mt_row
+    asl a
+    rol ptr+1
+    asl a
+    rol ptr+1
+    asl a
+    rol ptr+1
+    asl a
+    rol ptr+1
+    asl a
+    rol ptr+1           ; ptr+1:A = mt_row * 32
+    clc
+    adc mt_col
+    bcc :+
+    inc ptr+1
+:   clc
+    adc #<fieldmap
+    sta ptr
+    lda ptr+1
+    adc #>fieldmap
+    sta ptr+1
+    ldy #0
+    lda (ptr),y
+    rts
+.endproc
+
+; BuildOAM — write the hero's 4-tile metasprite into shadow OAM (entries 0-3).
+; OAM byte order per sprite: Y, tile, attributes, X. Stored Y is screen-Y - 1.
+.proc BuildOAM
+    ldx #HERO
+
+    ; top-left
+    lda ent_py,x
+    sec
+    sbc #1
+    sta oam+0
+    lda #$00
+    sta oam+1           ; sprite tile $00 (pattern table 1)
+    lda #$00
+    sta oam+2           ; palette 0, in front
+    lda ent_px,x
+    sta oam+3
+
+    ; top-right
+    lda ent_py,x
+    sec
+    sbc #1
+    sta oam+4
+    lda #$01
+    sta oam+5
+    lda #$00
+    sta oam+6
+    lda ent_px,x
+    clc
+    adc #8
+    sta oam+7
+
+    ; bottom-left  (screen-Y = py+8 -> stored py+7)
+    lda ent_py,x
+    clc
+    adc #7
+    sta oam+8
+    lda #$02
+    sta oam+9
+    lda #$00
+    sta oam+10
+    lda ent_px,x
+    sta oam+11
+
+    ; bottom-right
+    lda ent_py,x
+    clc
+    adc #7
+    sta oam+12
+    lda #$03
+    sta oam+13
+    lda #$00
+    sta oam+14
+    lda ent_px,x
+    clc
+    adc #8
+    sta oam+15
     rts
 .endproc
 

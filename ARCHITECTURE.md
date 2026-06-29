@@ -171,10 +171,17 @@ is preserved across battle, so `ExitBattle` returns it to the prior position.
 
 ## Movement & collision
 
-Grid is 16px cells; the map is 8px tiles. A move commits the target cell, then
-`StepMove` slides the sprite `MOVE_SPEED`(2)px/frame for 8 frames. A cell is
-solid if **any** of its four underlying 8px tiles is solid (tree/wall/water/NPC)
-— so 1-tile-thick borders block correctly. `CellSolid`→`CheckTile`→`MapTile`.
+Grid is 16px cells (16 wide x 15 tall); the map is 8px tiles. `TryStep` picks
+the target cell, **wrapping at the edges** (no border — the world is a torus),
+and starts a slide if that cell isn't solid. A cell is solid if **any** of its
+four underlying 8px tiles is solid (wall/water/NPC). `CellSolid`→`CheckTile`→
+`MapTile`.
+
+`StepMove` is **direction-based**: it moves the pixel position `MOVE_SPEED`(2)
+px/frame in `ent_dir`, wrapping X mod 256 (world width) and Y mod 240 (world
+height); after 16px it snaps the grid cell from the pixel position. The hero
+draws split across a seam: `BuildOAM` lets each tile's OAM X wrap by byte
+arithmetic and wraps OAM Y at 240, so walking off one edge slides in the other.
 
 -----
 

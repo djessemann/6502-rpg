@@ -433,8 +433,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; Attempt to start a step in ent_dir,x. Commits the new cell (and enters the
-; sliding state) only if the destination cell is in-bounds and not solid.
+; Attempt to start a step in ent_dir,x. The target cell wraps around the edges
+; (16 cols x 15 rows), so there is no border; only solid tiles block. Enters the
+; sliding state on success (the cell is committed when the slide finishes).
 ; X = entity index.
 .proc TryStep
     lda ent_gx,x
@@ -445,30 +446,48 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda ent_dir,x
     cmp #DIR_UP
     bne @nu
+    lda newgy           ; up: gy-1, wrap 0 -> 14
+    bne @up_dec
+    lda #14
+    sta newgy
+    jmp @check
+@up_dec:
     dec newgy
     jmp @check
 @nu:
     cmp #DIR_DOWN
     bne @nd
+    lda newgy           ; down: gy+1, wrap 14 -> 0
+    cmp #14
+    bcc @dn_inc
+    lda #0
+    sta newgy
+    jmp @check
+@dn_inc:
     inc newgy
     jmp @check
 @nd:
     cmp #DIR_LEFT
     bne @nl
+    lda newgx           ; left: gx-1, wrap 0 -> 15
+    bne @lf_dec
+    lda #15
+    sta newgx
+    jmp @check
+@lf_dec:
     dec newgx
     jmp @check
 @nl:
-    inc newgx           ; DIR_RIGHT
+    lda newgx           ; right: gx+1, wrap 15 -> 0
+    cmp #15
+    bcc @rt_inc
+    lda #0
+    sta newgx
+    jmp @check
+@rt_inc:
+    inc newgx
 
 @check:
-    ; bounds (unsigned: underflow wraps to a large value -> blocked)
-    lda newgx
-    cmp #16
-    bcs @blocked
-    lda newgy
-    cmp #15
-    bcs @blocked
-
     lda newgx
     sta cs_gx
     lda newgy
@@ -476,12 +495,7 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     jsr CellSolid       ; carry set => solid
     bcs @blocked
 
-    ; commit the move and begin the slide
-    lda newgx
-    sta ent_gx,x
-    lda newgy
-    sta ent_gy,x
-    lda #ST_MOVE
+    lda #ST_MOVE        ; begin the slide; cell is set when it completes
     sta ent_state,x
     lda #16
     sta ent_timer,x
@@ -489,47 +503,48 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; Slide the sprite toward its committed cell by MOVE_SPEED; finish when aligned.
-; X = entity index.
+; Slide the hero MOVE_SPEED pixels in ent_dir. Pixel position is canonical and
+; wraps (X mod 256 = world width, Y mod 240 = world height); when 16px have been
+; covered, snap the grid cell from the pixel position. X = entity index.
 .proc StepMove
-    lda ent_gx,x        ; target pixel x = gx * 16
-    asl a
-    asl a
-    asl a
-    asl a
-    sta tpx
-    lda ent_gy,x        ; target pixel y = gy * 16
-    asl a
-    asl a
-    asl a
-    asl a
-    sta tpy
-
-    lda ent_px,x
-    cmp tpx
-    beq @ydiff
-    bcc @xinc
+    lda ent_dir,x
+    cmp #DIR_LEFT
+    bne @nl
+    lda ent_px,x        ; left: byte wrap at 256
     sec
     sbc #MOVE_SPEED
     sta ent_px,x
-    jmp @ydiff
-@xinc:
+    jmp @tick
+@nl:
+    cmp #DIR_RIGHT
+    bne @nu
+    lda ent_px,x        ; right: byte wrap at 256
     clc
     adc #MOVE_SPEED
     sta ent_px,x
-
-@ydiff:
-    lda ent_py,x
-    cmp tpy
-    beq @tick
-    bcc @yinc
+    jmp @tick
+@nu:
+    cmp #DIR_UP
+    bne @down
+    lda ent_py,x        ; up: subtract, wrap mod 240
     sec
     sbc #MOVE_SPEED
     sta ent_py,x
+    cmp #240
+    bcc @tick
+    sec
+    sbc #16             ; underflow: convert byte-mod-256 to mod-240
+    sta ent_py,x
     jmp @tick
-@yinc:
+@down:
+    lda ent_py,x        ; down: add, wrap mod 240
     clc
     adc #MOVE_SPEED
+    sta ent_py,x
+    cmp #240
+    bcc @tick
+    sec
+    sbc #240
     sta ent_py,x
 
 @tick:
@@ -538,9 +553,21 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     sbc #MOVE_SPEED
     sta ent_timer,x
     bne @done
+    lda ent_px,x        ; aligned again: cell = pixel / 16
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta ent_gx,x
+    lda ent_py,x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta ent_gy,x
     lda #ST_IDLE
-    sta ent_state,x     ; aligned on the grid again
-    inc step_count      ; one completed grid step (hero only moves)
+    sta ent_state,x
+    inc step_count
 @done:
     rts
 .endproc
@@ -645,11 +672,15 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda #$00
     sta oamoff          ; slot * 4
 @slot:
-    ; Y (screen) = hero py + slot_dy - 1
+    ; Y (screen) = (py + slot_dy) wrapped at the bottom seam (240), then - 1
     lda ent_py
     clc
     adc slot_dy,x
+    cmp #240
+    bcc :+
     sec
+    sbc #240
+:   sec
     sbc #1
     ldy oamoff
     sta oam,y

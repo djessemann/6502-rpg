@@ -580,20 +580,16 @@ def main():
             f.write(f"    .byte {row}   ; hero tile ${i // 16:02X}\n")
 
     # --- build the field map ---
+    # No border: the world wraps (walk off an edge -> appear on the opposite
+    # side), so the paths run all the way to the screen edges.
     W, H = 32, 30
     m = [[T_GRASS] * W for _ in range(H)]
-    for x in range(W):
-        m[0][x] = T_TREE
-        m[H - 1][x] = T_TREE
-    for y in range(H):
-        m[y][0] = T_TREE
-        m[y][W - 1] = T_TREE
     for y in range(3, 8):
         for x in range(3, 9):
             m[y][x] = T_WATER
-    for y in range(1, H - 1):
+    for y in range(H):
         m[y][16] = T_PATH
-    for x in range(1, W - 1):
+    for x in range(W):
         m[22][x] = T_PATH
     for x in range(20, 26):
         m[3][x] = T_WALL

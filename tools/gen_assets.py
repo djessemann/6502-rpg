@@ -558,20 +558,24 @@ def main():
     # Full screen width (so the palette-3 attribute band aligns cleanly), with a
     # 1-tile black margin (W_FILL) inside the edges, the double-line frame, and
     # a 28x5 text interior. Drawn at nametable rows 20-27.
-    IN_W, IN_H = 28, 4
+    # The frame sits at the very edge of the box (no black margin outside it),
+    # so the field shows right up against the border. Interior is 30 wide x 4
+    # text lines, with one blank padding row above and below the text.
+    IN_W, IN_H = 30, 4
     lines = (list(SAMPLE_LINES) + [""] * IN_H)[:IN_H]
 
     def interior_row(s):
         cells = [W_FILL if c == " " else font_id[c] for c in s[:IN_W]]
         cells += [W_FILL] * (IN_W - len(cells))
-        return [W_FILL, W_L] + cells + [W_R, W_FILL]
+        return [W_L] + cells + [W_R]
 
-    winmap = [W_FILL] * 32                                   # row 0: top margin
-    winmap += [W_FILL, W_TL] + [W_T] * IN_W + [W_TR, W_FILL]  # row 1: top frame
-    for r in range(IN_H):                                    # rows 2-5: 4 text lines
+    pad_row = [W_L] + [W_FILL] * IN_W + [W_R]
+    winmap = [W_TL] + [W_T] * IN_W + [W_TR]     # row 0: top border
+    winmap += pad_row                            # row 1: top padding
+    for r in range(IN_H):                        # rows 2-5: 4 text lines
         winmap += interior_row(lines[r])
-    winmap += [W_FILL, W_BL] + [W_B] * IN_W + [W_BR, W_FILL]  # row 6: bottom frame
-    winmap += [W_FILL] * 32                                   # row 7: bottom margin
+    winmap += pad_row                            # row 6: bottom padding
+    winmap += [W_BL] + [W_B] * IN_W + [W_BR]     # row 7: bottom border
 
     # window draw steps: 4 clear (black) + 1 attribute + 4 content, 64 tiles/step.
     # Transitions route through an all-black region so no tile is ever shown

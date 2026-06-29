@@ -11,4 +11,4 @@ TILE_NPC_HI = $17   ; last NPC tile (solid range)
 ENEMY_TILE_BASE = $5C
 
 ; Text window: full-width box at nametable rows 20-27.
-WIN_STEPS = 34
+WIN_STEPS = 9

@@ -107,7 +107,8 @@ sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
 oamoff:       .res 1   ; current OAM slot offset (slot * 4)
 
-woff:         .res 1   ; window draw: tile offset / attribute offset scratch
+woff:         .res 1   ; window draw: chunk index (k)
+woff2:        .res 1   ; window draw: byte offset (k * 64)
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -803,56 +804,60 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     rts
 .endproc
 
-; DrawStep — build one VRAM packet for window draw chunk job_step (0..WIN_STEPS-1).
-; Chunks 0..31 are 8-tile slices of the 32x8 window (4 per row, 8 rows); chunks
-; 32-33 set/restore the two attribute rows. draw_mode 0=open (winmap/palette 3),
-; 1=close (restore field tiles/attributes). Addresses are computed, not tabled.
+; DrawStep — one VRAM packet for window draw step job_step (0..8). The window
+; region (nametable rows 20-27) is 256 contiguous bytes at $2280. To avoid ever
+; showing a tile under the wrong palette, transitions go through all-black:
+;   steps 0-3 : clear the region to black tiles (64 each) -- still old palette
+;   step  4   : set the region's 16 attribute bytes (new palette)
+;   steps 5-8 : draw the real content (64 each) -- now palette matches
+; Black (tile $00 = value 0) is palette-independent, so steps 0-4 never flash.
+; draw_mode 0 = open (winmap / palette 3), 1 = close (field tiles / field attrs).
 .proc DrawStep
     lda job_step
-    cmp #32
-    bcs @attr
-
-    ; ----- tile chunk: woff = (job_step>>2)*32 + (job_step&3)*8 -----
-    lda job_step
-    and #$03
+    cmp #4
+    beq @attr
+    bcs @content        ; 5-8
+    sta woff            ; 0-3: clear, k = job_step
+    jmp @tile
+@content:
+    sec
+    sbc #5
+    sta woff            ; 5-8: content, k = job_step - 5
+@tile:
+    ; byte offset = k * 64 ; dest = $2280 + offset
+    lda woff
     asl a
     asl a
-    asl a               ; column group * 8 -> 0,8,16,24
-    sta woff
-    lda job_step
-    lsr a
-    lsr a               ; row 0..7
     asl a
     asl a
     asl a
     asl a
-    asl a               ; row * 32
-    clc
-    adc woff
-    sta woff            ; offset within the window (0..248)
-
-    lda woff            ; nametable address = $2280 + woff
+    sta woff2
     clc
     adc #WIN_NT_LO
     sta vpkt_lo
     lda #WIN_NT_HI
     adc #0
     sta VBUF
-    lda #8
+    lda #64
     sta vpkt_cnt
 
+    lda job_step
+    cmp #5
+    bcc @clear_src      ; steps 0-3: black
+
     lda draw_mode
-    bne @tile_close
-    lda #<winmap        ; open: source the window tilemap
+    bne @content_close
+    lda #<winmap        ; open content: window tilemap
     clc
-    adc woff
+    adc woff2
     sta ptr
     lda #>winmap
     adc #0
     sta ptr+1
     jmp @build
-@tile_close:
-    lda woff            ; close: source fieldmap + 640 + woff
+@content_close:
+    lda woff2           ; close content: fieldmap + 640 + offset
     clc
     adc #$80
     sta ptr
@@ -867,27 +872,21 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     adc #>fieldmap
     sta ptr+1
     jmp @build
+@clear_src:
+    lda #<win_zeros
+    sta ptr
+    lda #>win_zeros
+    sta ptr+1
+    jmp @build
 
 @attr:
-    ; attribute chunk 32 -> $23E8 / fieldattr+40 ; 33 -> $23F0 / fieldattr+48
+    ; 16 attribute bytes $23E8-$23F7 (rows 20-27, full width)
     lda #$23
     sta VBUF
-    lda #8
-    sta vpkt_cnt
-    lda job_step
-    cmp #33
-    beq @attr1
     lda #$E8
     sta vpkt_lo
-    lda #40
-    sta woff
-    jmp @attr_src
-@attr1:
-    lda #$F0
-    sta vpkt_lo
-    lda #48
-    sta woff
-@attr_src:
+    lda #16
+    sta vpkt_cnt
     lda draw_mode
     bne @attr_close
     lda #<winattr       ; open: palette 3 in all quadrants
@@ -896,12 +895,9 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     sta ptr+1
     jmp @build
 @attr_close:
-    lda #<fieldattr     ; close: restore original attributes
-    clc
-    adc woff
+    lda #<(fieldattr + 40)   ; close: restore original attributes
     sta ptr
-    lda #>fieldattr
-    adc #0
+    lda #>(fieldattr + 40)
     sta ptr+1
 
 @build:
@@ -921,7 +917,10 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 
 .segment "RODATA"
 winattr:
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; palette 3, all quadrants
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; palette 3, all 16 quadrants
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+win_zeros:
+    .res 64, $00                                    ; black-tile fill source
 
 ; Enemy: 4x4 background tiles at nametable cols 14-17, rows 12-15.
 ; Row low bytes: $2000 + (12+r)*32 + 14. Tiles are ENEMY_TILE_BASE..+15.

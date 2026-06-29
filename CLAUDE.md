@@ -105,11 +105,19 @@ prototypes.
   on the BG backdrop slots — so they must hold the *same* value as the backdrop,
   or they silently overwrite it. (This caused a black battle screen: the backdrop
   was set to blue but a sprite-palette[0] of $0F clobbered it back to black.)
-- **Real vblank budget is small.** OAM DMA burns ~513 of the ~757 CPU cycles in
-  NTSC vblank, leaving ~240. A naive `lda buf,y / sta $2007 / iny / dex / bne`
-  flush is ~15 cyc/byte → only ~16 tiles/frame are safe. The "≈160 bytes/frame"
-  figure assumes an unrolled flush and most of vblank; until that exists, spread
-  big nametable updates across frames (the slice draws windows/enemy in chunks).
+- **Vblank budget.** NTSC vblank ≈ **2273 CPU cycles** (20 scanlines). OAM DMA
+  burns ~513, leaving ~1700; a naive `lda buf,y / sta $2007 / iny / dex / bne`
+  flush is ~15 cyc/byte → **~100+ tiles/frame** are safe, so the "≈160
+  bytes/frame" figure is realistic. (Don't confuse vblank length with the ~757
+  figure — that's wrong.) Still spread *very* large updates across frames, but
+  64 tiles/frame is comfortable.
+- **Palette change during a multi-frame nametable update flashes.** If you
+  redraw a region's tiles over several frames AND change its attribute (palette)
+  separately, there's a window where tiles render under the wrong palette (the
+  text box flashed green opening / white closing). Fix: route the transition
+  through **all-black** — clear the region to tile $00 (value 0 is
+  palette-independent), THEN switch the attribute, THEN draw the real content.
+  No tile is ever shown under a mismatched palette.
 - **Full-screen redraws** (field↔battle): you cannot do these in one vblank, so
   do them with rendering AND NMI disabled (the same safe window as boot): blank
   PPUMASK/PPUCTRL, write VRAM freely, reset scroll, re-enable. Push hidden/updated

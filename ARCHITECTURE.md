@@ -266,10 +266,25 @@ equal the backdrop** because of the $3F1x→$3F0x mirror (see CLAUDE.md trap).
 ## Asset pipeline (`tools/gen_assets.py`)
 
 Hand-authored art (digit grids for tiles, `'#'/'.'` for glyphs, 16x16 blocks
-doubled to 32x32 for the enemy) → encodes 2bpp planar CHR + the field/window
-tilemaps and a palette-aware attribute table → writes `src/chr.s` and
-`src/field.s`. Edit art there, re-run, commit the generated `.s`. The `make`
-build stays pure ca65/ld65 (no Python dependency).
+doubled to 32x32 for the enemy) → encodes 2bpp planar CHR + the world tilemaps,
+attribute tables, collision map, window shell, and text byte-streams → writes
+`src/chr.s`, `src/field.s`, `src/tiles.inc`, `src/messages.s`. Edit art there,
+re-run, commit the generated files. The `make` build stays pure ca65/ld65.
+
+### Adding content (the only entry points)
+All content flows through `tools/gen_assets.py`; never hand-edit `src/*.s` /
+`src/tiles.inc`. After any change: `python3 tools/gen_assets.py && make`.
+
+| To… | Edit in `gen_assets.py` |
+|------|--------------------------|
+| add / change a terrain tile | `TILES{}` (8×8 digit art; doubled into a 16×16 metatile) |
+| recolor                      | the palette tables (`pal_field` / `pal_battle` in `main.s`) + `cell_pal` |
+| change the map               | the `world[][]` build (terrain + `SOLID` set) |
+| place / face the NPC         | `NPC_GX`, `NPC_GY`, `NPC_FACING` |
+| add a character facing set   | `HERO_VIEWS` / `NPC_VIEWS` (down/up/side; left is mirrored) |
+| add / change a monster       | `ENEMY16` (16×16, doubled to 32×32) |
+| edit / add dialogue          | `MESSAGES[]` (auto word-wrapped; `\f` = page break) |
+| add a composed-text fragment | `FRAGMENTS[]` (for runtime numbers/labels) |
 
 -----
 

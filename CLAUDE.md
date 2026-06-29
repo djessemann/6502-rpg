@@ -7,6 +7,21 @@ art ambition is the spec; the mechanics are deliberately minimal.
 This file is the binding contract. Follow it in every session and every file.
 For the current task scope, see **SLICE.md**.
 
+## Documentation map
+- **CLAUDE.md** (this file) — binding contract for *this* project: scope
+  discipline, the active phase, this game's choices, the hardware rules.
+- **framework/** — the portable, project-agnostic distillation (method,
+  hardware contract, engine patterns, a `PROJECT` template). Canonical and
+  shareable; copy it to bootstrap a new NES RPG. The rules here mirror
+  `framework/HARDWARE.md`.
+- **ARCHITECTURE.md** — how *this* engine works now (code map) + how to add
+  content. Read before changing a subsystem.
+- **SLICE.md** — the current build scope.
+
+Doc rule: state the current truth (not history); one fact in one place; name
+the function instead of duplicating its code; update docs in the commit that
+changes the behavior.
+
 -----
 
 ## Scope discipline (READ FIRST — applies to every response)

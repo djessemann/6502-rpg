@@ -302,8 +302,8 @@ MESSAGES = [
     # name, text
     # "\f" forces a page break (press A to advance to the next page).
     ("NPC_GREETING",
-     "Hi Knoah this Taeko\f"
-     "Welcome to the sexy zone"),
+     "Hi you!\f"
+     "Welcome to the world!"),
     ("SLIME_APPEARS", "A Slime draws near!"),
     ("SLIME_DEFEATED", "The Slime is defeated!"),
     ("NOBODY", "There is no one there."),

@@ -698,12 +698,8 @@ def main():
             solid = world[my][mx] in SOLID or (mx, my) == (NPC_GX, NPC_GY)
             worldsolid.append(1 if solid else 0)
 
-    # Per-metatile palette (0/1/2), indexed [my*WM + mx]. Used to rebuild the
-    # attribute table for the current view when a menu/dialog box opens.
-    worldpal = [cell_pal(mx, my) for my in range(HM) for mx in range(WM)]
-
     # --- build the window SHELL: frame + blank interior, 32 wide x 8 tall ---
-    # (used by the gated text box; unchanged from the previous milestone)
+    # The runtime draws this in place over the scrolled map (see DrawStep).
     IN_W = 30
     pad_row = [W_ids["L"]] + [W_ids["FILL"]] * IN_W + [W_ids["R"]]
     winmap = [W_ids["TL"]] + [W_ids["T"]] * IN_W + [W_ids["TR"]]
@@ -719,13 +715,12 @@ def main():
         f.write("; as 8px tiles (60 rows x 64 cols: [32 left | 32 right] per row); the\n")
         f.write("; runtime fills the two nametables from it and streams rows on scroll.\n")
         f.write("; attr_pair_l/r feed the attribute shadow; worldsolid is collision.\n\n")
-        f.write(".export worldtiles, attr_pair_l, attr_pair_r, worldsolid, worldpal, winmap\n\n")
+        f.write(".export worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap\n\n")
         f.write('.segment "RODATA"\n')
         f.write(fmt_bytes("worldtiles", worldtiles, 32) + "\n\n")
         f.write(fmt_bytes("attr_pair_l", attr_pair_l, 8) + "\n\n")
         f.write(fmt_bytes("attr_pair_r", attr_pair_r, 8) + "\n\n")
         f.write(fmt_bytes("worldsolid", worldsolid, 32) + "\n\n")
-        f.write(fmt_bytes("worldpal", worldpal, 32) + "\n\n")
         f.write(fmt_bytes("winmap", winmap, 32) + "\n")
 
     # --- messages + fragments ---

@@ -212,29 +212,46 @@ is 16-bit (`ent_px`/`ent_pxh`), wrapping mod 512; world Y is 16-bit
 (`ent_py`/`ent_pyh`), wrapping mod 480. After 16px it snaps the grid cell from the
 world position (`gx = (pxh<<4)|(px>>4)`, `gy = (pyh<<4)|(py>>4)`).
 
-### Boxes/battle over the scrolling camera
+### Text boxes drawn in place over the scrolling map (Dragon-Quest style)
 
-The text box, command menu, NPC dialogue, and battle all draw into **fixed**
-nametable addresses ($22xx), which only works at scroll (0,0). Two mechanisms
-make that hold:
+The text box / command menu / NPC dialogue are drawn **directly into the
+scrolled nametables, in place over the map, and the map is restored underneath
+on close** — no layout swap, no rendering-off, **no flash**. This is the
+window technique real NES RPGs (Dragon Warrior / Final Fantasy) use, and it's
+the convention for every box in the full game. The box is a full-width, 8-row
+window at screen rows 20-27.
 
-- **Battle** is a full-screen view: `EnterBattle` sets `in_battle`, the NMI
-  forces scroll (0,0), and `ExitBattle` repaints the field at the hero's current
-  position (camera-aware `DrawField`) and restores the field scroll.
-- **Field boxes** (`EnterFieldBox`): the hero is grid-aligned when a box opens,
-  so the camera sits on a 16px boundary (the view is metatile-aligned). The
-  current on-screen 32×30 view is copied into nametable 0 (tiles from
-  `worldtiles`, attributes rebuilt from `worldpal` by `BuildViewAttr`), `box_view`
-  is set so the NMI holds scroll (0,0), and the existing box code runs unchanged.
-  `ExitFieldBox` repaints the scrolling layout and restores the camera. Each
-  transition costs one blank frame (rendering off during the copy).
+- **Geometry** (`ComputeBoxGeom`, on open): the hero is grid-aligned when a box
+  opens, so the camera is on a 16px boundary (the view is metatile-aligned —
+  this is what keeps attributes clean). Field box top = nametable row
+  `(cam_ty+20) mod 30`, left edge = `camX/8`. Battle box = fixed row 20, col 0
+  (the battle screen is held at scroll 0,0).
+- **Seam split** (`SplitRange`): the box spans the full screen width, so each row
+  straddles the two side-by-side nametables. Every row write is split into 1-2
+  contiguous segments (`PutSeg` → the NMI stream descriptors). For the battle box
+  (`box_cstart = 0`) the split collapses to a single NT0 write at `$22xx`, so the
+  same code serves both.
+- **Animation** (`DrawStep`, 9 steps, black-intermediate): 4 steps clear the box
+  rows to tile $00, 1 step sets attributes, 4 steps draw content — so no tile is
+  ever shown under a mismatched palette. `draw_mode` 0 = open (window shell from
+  `winmap`), 1 = close (restore the map from `worldtiles`). `QueueBoxTileRow`
+  picks the per-row source by `bx_phase`.
+- **Attributes** (`DrawBoxAttr` + `MergeAttrRow` with `attr_force`): the box's 4
+  metatile-rows are folded into the attribute shadow **per metatile-row nibble**
+  (palette 3 on open, the map's palette on close), then the affected attribute
+  rows are written from the shadow. Because each metatile-row is a separate
+  nibble, neighbouring map rows in the same attribute byte keep their colour —
+  **no palette bleed at the box edges**, at any scroll position.
+- Text/prompt updates (`RenderLine`, `DrawPrompt`) render into `linebuf` and use
+  the same seam split, so they also land at the correct scrolled addresses.
 
-`StreamRows` is **gated off** while `in_battle`/`box_view` is set, and both
-`EnterBattle`/`EnterFieldBox` clear `stream_req`. Otherwise an encounter (or
-menu) that opens on the same step that crosses a tile-row boundary would let the
-next NMI write a queued field row-stream onto the battle/box screen — an
-intermittent strip of map tiles (it only triggers when the opening step also
-crosses a 16px vertical boundary).
+`box_open` freezes `StreamRows` while a field box is up (battle uses `in_battle`),
+and both opens clear `stream_req`, so a queued field row-stream can never bleed
+onto the box.
+
+**Battle** is still a full-screen scene: `EnterBattle` sets `in_battle` (NMI
+holds scroll 0,0), and `ExitBattle` repaints the field at the hero's position
+(camera-aware `DrawField`) and restores the field scroll.
 
 -----
 

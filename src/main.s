@@ -13,7 +13,7 @@
 .include "nes.inc"
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
-.import worldtiles, attr_pair_l, attr_pair_r, worldsolid, worldpal, winmap, msg_table
+.import worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
 .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
 .import frag_LBL_ATK, frag_LBL_POWER
@@ -62,10 +62,9 @@ BP_DEFEATED = 3         ; defeat shown; A -> erase enemy and return
 
 ENEMY_MAX_HP = 15
 
-; WIN_STEPS comes from tiles.inc (window draw chunks). Window is a full-width
-; box at nametable rows 20-27; nametable base of row 20 = $2000 + 20*32 = $2280.
-WIN_NT_HI  = $22
-WIN_NT_LO  = $80        ; low byte of $2280
+; WIN_STEPS comes from tiles.inc (box draw chunks: 4 clear + 1 attr + 4 content).
+; The box is a full-width, 8-row window at screen rows 20-27, drawn in place over
+; the scrolled map (see ComputeBoxGeom / DrawStep).
 
 ENC_STEPS  = 16         ; grid steps before an encounter fires
 DIE_DELAY  = 30         ; frames to wait after the enemy dies before returning
@@ -144,6 +143,22 @@ ms_hi:        .res 1
 bs_par:       .res 1   ; scratch (MY / parity)
 bs_cnt:       .res 1   ; scratch loop counter
 
+; --- text-box geometry (the box is drawn in place over the scrolled map) ---
+; Computed when a box opens; the box is 8 nametable rows, full screen width.
+box_nt_base:  .res 1   ; nametable tile-row of the box top (0..29)
+box_wrow:     .res 1   ; world tile-row of the box top (0..59), for the restore
+box_cstart:   .res 1   ; nametable column of the box left edge (0..63)
+bx_phase:     .res 1   ; DrawStep phase: 0 clear, 1 shell, 2 restore (map)
+attr_force:   .res 1   ; MergeAttrRow: nonzero = force palette 3 (box) into shadow
+nt_row_tmp:   .res 1   ; current nametable row being queued
+; SplitRange outputs: a screen-relative run split across the two nametables
+sr_cnt:       .res 1   ; input: tile count
+sg1_base:     .res 1   ; segment 1 nametable base hi ($20/$24)
+sg1_col:      .res 1   ; segment 1 start column
+sg1_cnt:      .res 1   ; segment 1 tile count
+sg2_base:     .res 1   ; segment 2 nametable base hi (other screen)
+sg2_cnt:      .res 1   ; segment 2 tile count (0 = no split)
+
 ; metasprite build scratch
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
@@ -160,7 +175,7 @@ term_action:  .res 1   ; how the last line ended: 0=newline 1=page 2=end
 aux_flag:     .res 1   ; one-shot latch (e.g. "prompt drawn")
 msg_context:  .res 1   ; CTX_FIELD / CTX_BATTLE
 in_battle:    .res 1   ; nonzero while on the battle screen (hides the hero)
-box_view:     .res 1   ; nonzero while a field box is open (view in NT0, scroll 0,0)
+box_open:     .res 1   ; nonzero while a field box is open (freezes streaming)
 
 ; battle / combat
 enemy_hp:     .res 1
@@ -196,6 +211,7 @@ ent_state: .res MAX_ENT   ; ST_IDLE / ST_MOVE
 ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 
 msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
+linebuf:   .res 32        ; one rendered text line (before seam-split to VRAM)
 
 ; Attribute-table shadows (RAM copies of the two nametables' attributes). The
 ; row streamer read-modify-writes these (one metatile == one attr quadrant, so
@@ -375,9 +391,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     ; scroll is fixed at (0,0); on the field, camX high bit selects which
     ; nametable is top-left and scrollY is the camera's vertical position.
     bit PPUSTATUS
-    lda in_battle
-    ora box_view
-    bne @fixedscroll
+    lda in_battle       ; only the battle screen is fixed at (0,0); a field box
+    bne @fixedscroll    ; is drawn in place over the normally-scrolled map
     lda camX_lo
     sta PPUSCROLL
     lda scrollY
@@ -884,7 +899,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 ; ----------------------------------------------------------------------------
 .proc StreamRows
     lda in_battle       ; never stream field rows onto the battle/box screen
-    ora box_view
+    ora box_open
     bne @none
     lda cam_ty
     cmp prev_cam_ty
@@ -1232,9 +1247,18 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     rts
 
 @closing:
-    jsr ExitFieldBox    ; repaint the scrolling field and restore the camera
+    lda #1              ; draw mode = close (restore the map under the box)
+    sta draw_mode
+    jsr DrawStep
+    inc job_step
+    lda job_step
+    cmp #WIN_STEPS
+    bcc @ret6
+    lda #0
+    sta box_open        ; box fully removed; resume field streaming
     lda #GS_FIELD
     sta gamestate
+@ret6:
     rts
 .endproc
 
@@ -1345,14 +1369,16 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 :   rts
 .endproc
 
-; OpenMenuBox — set up menu A and open the box (used from the field). First
-; switches to the box view (current screen copied into NT0 at scroll 0,0) so the
-; fixed-address box code works regardless of the field scroll position.
+; OpenMenuBox — set up menu A and open the box (used from the field). The box is
+; drawn in place over the scrolled map, so just compute its on-screen geometry,
+; freeze streaming, and let GS_OPENING animate it in.
 .proc OpenMenuBox
-    pha
-    jsr EnterFieldBox
-    pla
     sta menu_id
+    jsr ComputeBoxGeom  ; box position for the current camera
+    lda #1
+    sta box_open        ; freeze row-streaming while the box is up
+    lda #0
+    sta stream_req      ; drop any field row-stream queued this frame
     lda #0
     sta menu_cursor
     lda #1
@@ -1497,27 +1523,12 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 weapon_atk:
     .byte 4, 8          ; Club, Sword
 
-; RenderLine — render one interior line (cur_line) of the current message into
-; the VRAM buffer, padding to TEXT_COLS. Sets term_action from the control code
-; that ended the line: 0 = newline, 1 = page break, 2 = end of message.
-; Interior line L is nametable row 22+L, cols 1-30 -> address $22C1 + L*32.
+; RenderLine — render interior line cur_line of the current message into linebuf
+; (padded to TEXT_COLS), then queue it into the box's row over the scrolled map,
+; split at the seam. term_action is set from the ending control code:
+; 0 = newline, 1 = page break, 2 = end. Interior line L is box row 2+L.
 .proc RenderLine
-    lda cur_line
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    clc
-    adc #$C1
-    sta vpkt_lo
-    lda #$22
-    adc #0
-    sta VBUF
-    lda #TEXT_COLS
-    sta vpkt_cnt
-
-    ldx #0              ; column / VBUF data index
+    ldx #0              ; column index into linebuf
     ldy #0
 @read:
     lda (msg_ptr),y
@@ -1533,7 +1544,7 @@ weapon_atk:
     beq @end
     cpx #TEXT_COLS      ; overflow safety: discard but keep consuming
     bcs @read
-    sta VBUF+3,x
+    sta linebuf,x
     inx
     jmp @read
 @nl:
@@ -1551,41 +1562,119 @@ weapon_atk:
     lda #$00
 @padloop:
     cpx #TEXT_COLS
-    bcs @done
-    sta VBUF+3,x
+    bcs @emit
+    sta linebuf,x
     inx
     jmp @padloop
-@done:
-    lda vpkt_lo
-    sta VBUF+1
-    lda vpkt_cnt
-    sta VBUF+2
+@emit:
+    ; nt_row = (box_nt_base + 2 + cur_line) mod 30
+    lda box_nt_base
+    clc
+    adc #2
+    adc cur_line
+    cmp #30
+    bcc :+
+    sbc #30
+:   sta nt_row_tmp
+    ; split [box col 1, TEXT_COLS] at the seam
+    lda #TEXT_COLS
+    sta sr_cnt
+    lda box_cstart
+    clc
+    adc #1
+    and #$3F
+    jsr SplitRange
+    ldx #0              ; segment 1 -> descriptor 0, source = linebuf
+    lda sg1_base
+    sta tpx
+    lda nt_row_tmp
+    sta tpy
+    lda sg1_col
+    sta mt_col
+    lda sg1_cnt
+    sta mt_row
+    lda #<linebuf
+    sta ptr
+    lda #>linebuf
+    sta ptr+1
+    jsr PutSeg
+    lda sg2_cnt
+    beq @one
+    ldx #1              ; segment 2 -> descriptor 1, source = linebuf + sg1_cnt
+    lda sg2_base
+    sta tpx
+    lda nt_row_tmp
+    sta tpy
+    lda #0
+    sta mt_col
+    lda sg2_cnt
+    sta mt_row
+    lda #<linebuf
+    clc
+    adc sg1_cnt
+    sta ptr
+    lda #>linebuf
+    adc #0
+    sta ptr+1
+    jsr PutSeg
+    lda #2
+    sta stream_req
+    rts
+@one:
+    lda #1
+    sta stream_req
     rts
 .endproc
 
-; DrawPrompt / ErasePrompt — the "more text" triangle on the bottom border,
-; centered at nametable $236F (row 27, col 15).
+; DrawPrompt / ErasePrompt — the "more text" triangle on the box's bottom border
+; (box row 7, column 15), drawn in place over the scrolled map.
 .proc DrawPrompt
-    lda #$23
-    sta VBUF
-    lda #$6F
-    sta VBUF+1
-    lda #1
-    sta VBUF+2
     lda #ARROW_TILE
-    sta VBUF+3
-    rts
+    jmp PromptTile
 .endproc
 
 .proc ErasePrompt
-    lda #$23
-    sta VBUF
-    lda #$6F
-    sta VBUF+1
-    lda #1
-    sta VBUF+2
     lda #WIN_BOTTOM_TILE
-    sta VBUF+3
+    jmp PromptTile
+.endproc
+
+; PromptTile — write tile A at box row 7, column 15 (one tile, one nametable).
+.proc PromptTile
+    sta linebuf         ; 1-byte source
+    lda box_nt_base
+    clc
+    adc #7
+    cmp #30
+    bcc :+
+    sbc #30
+:   sta tpy             ; nt_row
+    lda box_cstart
+    clc
+    adc #15
+    and #$3F            ; nametable column of box col 15
+    cmp #32
+    bcc @nt0
+    sec
+    sbc #32
+    sta mt_col
+    lda #$24
+    sta tpx
+    jmp @put
+@nt0:
+    sta mt_col
+    lda #$20
+    sta tpx
+@put:
+    lda #1
+    sta mt_row
+    lda #<linebuf
+    sta ptr
+    lda #>linebuf
+    sta ptr+1
+    ldx #0
+    jsr PutSeg
+    lda #1
+    sta stream_req
     rts
 .endproc
 
@@ -1627,116 +1716,52 @@ weapon_atk:
     rts
 .endproc
 
-; DrawStep — one VRAM packet for window draw step job_step (0..8). The window
-; region (nametable rows 20-27) is 256 contiguous bytes at $2280. To avoid ever
-; showing a tile under the wrong palette, transitions go through all-black:
-;   steps 0-3 : clear the region to black tiles (64 each) -- still old palette
-;   step  4   : set the region's 16 attribute bytes (new palette)
-;   steps 5-8 : draw the real content (64 each) -- now palette matches
-; Black (tile $00 = value 0) is palette-independent, so steps 0-4 never flash.
-; draw_mode 0 = open (winmap / palette 3), 1 = close (field tiles / field attrs).
+; DrawStep — one animation step of the in-place text box (job_step 0..8). The
+; box is drawn over the scrolled map and restored on close; to avoid ever showing
+; a tile under the wrong palette, transitions go through all-black:
+;   steps 0-3 : clear the 8 box rows to black tiles (2 rows/step)
+;   step  4   : set the box attribute region (palette 3 open / map palette close)
+;   steps 5-8 : draw the real content (2 rows/step)
+; Each row is queued as 1-2 stream descriptors (split at the scroll seam) for the
+; NMI to write. draw_mode 0 = open (window shell), 1 = close (restore the map).
 .proc DrawStep
     lda job_step
     cmp #4
-    beq @attr
-    bcs @content        ; 5-8
-    sta woff            ; 0-3: clear, k = job_step
-    jmp @tile
-@content:
-    sec
+    bne :+
+    jmp @attr
+:   bcc @clear          ; 0-3
+    sec                 ; 5-8: content
     sbc #5
-    sta woff            ; 5-8: content, k = job_step - 5
-@tile:
-    ; byte offset = k * 64 ; dest = $2280 + offset
+    sta woff            ; k
+    lda draw_mode
+    beq @shell
+    lda #2
+    sta bx_phase        ; restore the map (close)
+    jmp @rows
+@shell:
+    lda #1
+    sta bx_phase        ; window shell (open)
+    jmp @rows
+@clear:
+    sta woff            ; k = job_step (0-3)
+    lda #0
+    sta bx_phase
+@rows:
+    lda #0
+    sta bs_cnt          ; descriptor index
     lda woff
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    sta woff2
+    asl a               ; j0 = k*2
+    pha
+    jsr QueueBoxTileRow
+    pla
     clc
-    adc #WIN_NT_LO
-    sta vpkt_lo
-    lda #WIN_NT_HI
-    adc #0
-    sta VBUF
-    lda #64
-    sta vpkt_cnt
-
-    lda job_step
-    cmp #5
-    bcc @clear_src      ; steps 0-3: black
-
-    lda draw_mode
-    bne @content_close
-    lda #<winmap        ; open content: window tilemap
-    clc
-    adc woff2
-    sta ptr
-    lda #>winmap
-    adc #0
-    sta ptr+1
-    jmp @build
-@content_close:
-    ; close content source (gated dialog; re-wired to the camera in Milestone 3).
-    ; Points at worldtiles + 640 + offset purely so the gated path links.
-    lda woff2
-    clc
-    adc #$80
-    sta ptr
-    lda #$02
-    adc #0
-    sta ptr+1
-    lda ptr
-    clc
-    adc #<worldtiles
-    sta ptr
-    lda ptr+1
-    adc #>worldtiles
-    sta ptr+1
-    jmp @build
-@clear_src:
-    lda #<win_zeros
-    sta ptr
-    lda #>win_zeros
-    sta ptr+1
-    jmp @build
-
+    adc #1              ; j1
+    jsr QueueBoxTileRow
+    lda bs_cnt
+    sta stream_req
+    rts
 @attr:
-    ; 16 attribute bytes $23E8-$23F7 (rows 20-27, full width)
-    lda #$23
-    sta VBUF
-    lda #$E8
-    sta vpkt_lo
-    lda #16
-    sta vpkt_cnt
-    lda draw_mode
-    bne @attr_close
-    lda #<winattr       ; open: palette 3 in all quadrants
-    sta ptr
-    lda #>winattr
-    sta ptr+1
-    jmp @build
-@attr_close:
-    lda #<(attr_pair_l + 40)   ; gated close-attr source (re-wired in Milestone 3)
-    sta ptr
-    lda #>(attr_pair_l + 40)
-    sta ptr+1
-
-@build:
-    lda vpkt_lo
-    sta VBUF+1
-    lda vpkt_cnt
-    sta VBUF+2
-    ldy #0
-@copy:
-    lda (ptr),y
-    sta VBUF+3,y
-    iny
-    cpy vpkt_cnt
-    bne @copy
+    jsr DrawBoxAttr
     rts
 .endproc
 
@@ -1826,6 +1851,7 @@ slot_dy:
     sta PPUMASK         ; rendering on
 
     ; Begin combat: set up state, then open the message box and show the intro.
+    jsr ComputeBoxGeom  ; box geometry for the battle screen (fixed at row 20)
     lda #ENEMY_MAX_HP
     sta enemy_hp
     lda #BP_INTRO
@@ -2077,6 +2103,7 @@ slot_dy:
     bpl @clr
 
     lda #0
+    sta attr_force      ; use the map's palettes, not the box fill
     sta tpx             ; tile-row index i = 0..29 (MergeAttrRow clobbers X/Y)
 @m:
     lda cam_ty          ; T = (cam_ty + i) mod 60
@@ -2150,13 +2177,17 @@ slot_dy:
     lda rb_hi
     bne @odd
 @even:
+    jsr @pairL          ; low nibble = left/right metatile palettes
+    sta mt_col
     lda attr_shadow_l,x
     and #$F0
-    ora attr_pair_l,y
+    ora mt_col
     sta attr_shadow_l,x
+    jsr @pairR
+    sta mt_col
     lda attr_shadow_r,x
     and #$F0
-    ora attr_pair_r,y
+    ora mt_col
     sta attr_shadow_r,x
     inx
     iny
@@ -2164,30 +2195,46 @@ slot_dy:
     bne @even
     rts
 @odd:
-    lda attr_pair_l,y
+    jsr @pairL          ; high nibble
     asl a
     asl a
     asl a
     asl a
-    sta rb_lo
+    sta mt_col
     lda attr_shadow_l,x
     and #$0F
-    ora rb_lo
+    ora mt_col
     sta attr_shadow_l,x
-    lda attr_pair_r,y
+    jsr @pairR
     asl a
     asl a
     asl a
     asl a
-    sta rb_lo
+    sta mt_col
     lda attr_shadow_r,x
     and #$0F
-    ora rb_lo
+    ora mt_col
     sta attr_shadow_r,x
     inx
     iny
     dec bs_cnt
     bne @odd
+    rts
+; pair value for the current column (Y): the map's palettes, or $0F (palette 3,
+; both quadrants) when attr_force is set (drawing a box). Preserves X, Y.
+@pairL:
+    lda attr_force
+    bne :+
+    lda attr_pair_l,y
+    rts
+:   lda #$0F
+    rts
+@pairR:
+    lda attr_force
+    bne :+
+    lda attr_pair_r,y
+    rts
+:   lda #$0F
     rts
 .endproc
 
@@ -2306,269 +2353,339 @@ slot_dy:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; EnterFieldBox — switch from the scrolling field to the "box view": copy the
-; 32x30 tiles currently on screen into nametable 0 (with matching attributes)
-; and set box_view so the NMI holds the scroll at (0,0). The fixed-address box
-; code (DrawStep/RenderLine at $22xx) then works regardless of field scroll.
-; The hero is grid-aligned when this is called, so the view is metatile-aligned.
-; Rendering is off during the copy (one blank frame).
+; Text box drawn IN PLACE over the scrolling map (Dragon-Quest style): the box
+; tiles are written into the scrolled nametables and the map is restored under
+; them on close -- no layout swap, no rendering-off, no flash. The box spans 8
+; nametable rows (screen rows 20-27), full screen width, so each row is split
+; across the two side-by-side nametables at the scroll seam. Attribute (palette)
+; updates go per metatile-row through the shadow so neighbouring map tiles in the
+; same attribute byte keep their colour (no bleed at the box edges).
 ; ----------------------------------------------------------------------------
-.proc EnterFieldBox
-    jsr WaitFrame
-    lda #$00
-    sta PPUCTRL
-    sta PPUMASK
 
-    ; camX_tile = camX / 8 (0..63) -> mt_col
-    lda camX_lo
-    lsr a
-    lsr a
-    lsr a
-    sta mt_col
-    lda camX_hi
-    beq :+
-    lda mt_col
+; ComputeBoxGeom -- set the box position when it opens. field: top = screen row
+; 20 -> nametable row (cam_ty+20) mod 30, left edge = camX/8. battle: fixed at
+; row 20, column 0 (the battle screen is held at scroll 0,0).
+.proc ComputeBoxGeom
+    lda in_battle
+    bne @battle
+    lda cam_ty           ; world tile-row of box top = cam_ty + 20 (mod 60)
     clc
-    adc #32
-    sta mt_col
-:   ; part1 count (tiles before the source column wraps at 64) -> mt_row
-    lda mt_col
-    cmp #33
-    bcc @full
-    lda #64
-    sec
-    sbc mt_col
-    sta mt_row
-    jmp @rep
-@full:
-    lda #32
-    sta mt_row
-
-@rep:
-    bit PPUSTATUS       ; NT0 tiles -> $2000, written row by row (auto-increment)
-    lda #$20
-    sta PPUADDR
-    lda #$00
-    sta PPUADDR
-    lda #0
-    sta tpx             ; screen row r = 0..29
-@row:
-    lda cam_ty          ; WR = (cam_ty + r) mod 60
-    clc
-    adc tpx
+    adc #20
     cmp #60
     bcc :+
     sbc #60
-:   sta ms_lo
-    lda #0
-    sta ms_hi
-    ldx #6              ; ptr = worldtiles + WR*64
-@sh:
-    asl ms_lo
-    rol ms_hi
-    dex
-    bne @sh
-    lda ms_lo
+:   sta box_wrow
+    cmp #30              ; nametable row = that mod 30
+    bcc :+
+    sbc #30
+:   sta box_nt_base
+    lda camX_lo          ; left edge column = camX / 8 (0..63)
+    lsr a
+    lsr a
+    lsr a
+    sta box_cstart
+    lda camX_hi
+    beq @done
+    lda box_cstart
     clc
-    adc #<worldtiles
-    sta ptr
-    lda ms_hi
-    adc #>worldtiles
-    sta ptr+1
-    ; part 1: source cols camX_tile.. (mt_row tiles)
-    ldy mt_col
-    ldx mt_row
-@p1:
-    lda (ptr),y
-    sta PPUDATA
-    iny
-    dex
-    bne @p1
-    ; part 2: wrapped source cols 0.. (32 - mt_row tiles)
-    lda #32
-    sec
-    sbc mt_row
-    beq @nrow
-    tax
-    ldy #0
-@p2:
-    lda (ptr),y
-    sta PPUDATA
-    iny
-    dex
-    bne @p2
-@nrow:
-    inc tpx
-    lda tpx
-    cmp #30
-    beq @attr
-    jmp @row
-
-@attr:
-    jsr BuildViewAttr   ; NT0 attributes for the current view
-    lda #1
-    sta box_view
+    adc #32
+    sta box_cstart
+    jmp @done
+@battle:
+    lda #20
+    sta box_wrow
+    sta box_nt_base
     lda #0
-    sta stream_req      ; discard any field row-stream queued this frame
-
-    bit PPUSTATUS       ; box view is shown at scroll (0,0)
-    lda #$00
-    sta PPUSCROLL
-    sta PPUSCROLL
-    lda #%10001000
-    sta PPUCTRL
-    lda #%00011110
-    sta PPUMASK
+    sta box_cstart
+@done:
     rts
 .endproc
 
-; BuildViewAttr — compute nametable 0's attribute table for the current view
-; from worldpal (per-metatile palette) and write it to $23C0. The view origin
-; in metatiles is (camX_tile/2, cam_ty/2); both are even when grid-aligned, so
-; each attribute quadrant is exactly one world metatile. Uses attr_shadow_l as
-; a scratch buffer (DrawField rebuilds it on close). Rendering off only.
-.proc BuildViewAttr
-    ldx #63
+; SplitRange -- split a screen-relative run starting at nametable column A
+; (0..63), length sr_cnt, into up to two contiguous segments (one per nametable)
+; at the seam. Outputs sg1_* and sg2_* (sg2_cnt = 0 when it fits in one screen).
+.proc SplitRange
+    cmp #32
+    bcs @nt1
+    sta sg1_col          ; run begins in NT0
+    lda #$20
+    sta sg1_base
+    lda #$24
+    sta sg2_base
+    lda #32
+    sec
+    sbc sg1_col          ; tiles to the seam
+    jmp @fit
+@nt1:
+    sec
+    sbc #32
+    sta sg1_col          ; run begins in NT1
+    lda #$24
+    sta sg1_base
+    lda #$20
+    sta sg2_base
+    lda #32
+    sec
+    sbc sg1_col
+@fit:
+    cmp sr_cnt           ; A = room before the seam
+    bcc @split
+    lda sr_cnt           ; fits in one segment
+    sta sg1_cnt
     lda #0
-@clr:
-    sta attr_shadow_l,x
-    dex
-    bpl @clr
+    sta sg2_cnt
+    rts
+@split:
+    sta sg1_cnt          ; A = room
+    lda sr_cnt
+    sec
+    sbc sg1_cnt
+    sta sg2_cnt
+    rts
+.endproc
 
-    lda cam_ty          ; vmr0 = cam_ty / 2
-    lsr a
-    sta bs_par
-    lda mt_col          ; vmc0 = camX_tile / 2
-    lsr a
-    sta bs_cnt
-
+; PutSeg -- store one stream descriptor (index X): nametable address
+; tpx:(tpy*32 + mt_col), count mt_row, source pointer (ptr).
+.proc PutSeg
+    lda tpy
+    sta rb_lo
     lda #0
-    sta tpx             ; vmr = 0..14
-@vmr:
-    lda bs_par          ; world metatile row = (vmr0 + vmr) mod 30
+    sta rb_hi
+    ldy #5
+@sh:
+    asl rb_lo
+    rol rb_hi
+    dey
+    bne @sh
+    lda rb_lo
     clc
+    adc mt_col
+    sta sd_dst_lo,x
+    lda rb_hi
     adc tpx
+    sta sd_dst_hi,x
+    lda ptr
+    sta sd_src_lo,x
+    lda ptr+1
+    sta sd_src_hi,x
+    lda mt_row
+    sta sd_cnt,x
+    rts
+.endproc
+
+; QueueBoxTileRow -- queue the segments for one full-width box row (A = box row
+; 0..7) into descriptors starting at bs_cnt. Source is chosen by bx_phase:
+; 0 = black clear, 1 = window shell (winmap), 2 = restore the map (worldtiles).
+.proc QueueBoxTileRow
+    sta bs_par
+    clc                  ; nt_row = (box_nt_base + j) mod 30
+    adc box_nt_base
     cmp #30
     bcc :+
     sbc #30
-:   sta rb_lo           ; *32 -> ptr = worldpal + row*32
+:   sta nt_row_tmp
+    lda #32              ; split the full-width row at the seam
+    sta sr_cnt
+    lda box_cstart
+    jsr SplitRange
+    lda bx_phase
+    bne @notclear
+    lda #<win_zeros      ; clear: both segments read zeros
+    sta ptr
+    sta ms_lo
+    lda #>win_zeros
+    sta ptr+1
+    sta ms_hi
+    jmp @emit
+@notclear:
+    cmp #2
+    beq @restore
+    lda bs_par           ; shell: winmap + j*32 (indexed by box column)
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc #<winmap
+    sta ptr
+    lda #0
+    adc #>winmap
+    sta ptr+1
+    lda ptr              ; seg2 src follows seg1 by sg1_cnt
+    clc
+    adc sg1_cnt
+    sta ms_lo
+    lda ptr+1
+    adc #0
+    sta ms_hi
+    jmp @emit
+@restore:
+    lda box_wrow         ; restore: worldtiles[(box_wrow+j) mod 60], by global col
+    clc
+    adc bs_par
+    cmp #60
+    bcc :+
+    sbc #60
+:   sta rb_lo
     lda #0
     sta rb_hi
-    ldx #5
-@s:
+    ldy #6
+@w:
     asl rb_lo
     rol rb_hi
-    dex
-    bne @s
+    dey
+    bne @w
     lda rb_lo
     clc
-    adc #<worldpal
-    sta ptr
+    adc #<worldtiles
+    sta ms_lo            ; ms = row base (global column 0) = seg2 src
     lda rb_hi
-    adc #>worldpal
+    adc #>worldtiles
+    sta ms_hi
+    lda ms_lo            ; seg1 src = row base + box_cstart (global column)
+    clc
+    adc box_cstart
+    sta ptr
+    lda ms_hi
+    adc #0
     sta ptr+1
-
+@emit:
+    ldx bs_cnt           ; segment 1 -> descriptor bs_cnt
+    lda sg1_base
+    sta tpx
+    lda nt_row_tmp
+    sta tpy
+    lda sg1_col
+    sta mt_col
+    lda sg1_cnt
+    sta mt_row
+    jsr PutSeg
+    inc bs_cnt
+    lda sg2_cnt          ; segment 2 only if the row crossed the seam
+    beq @done
+    ldx bs_cnt
+    lda sg2_base
+    sta tpx
+    lda nt_row_tmp
+    sta tpy
     lda #0
-    sta tpy             ; vmc = 0..15
-@vmc:
-    lda bs_cnt          ; mc = (vmc0 + vmc) mod 32
-    clc
-    adc tpy
-    and #31
-    tay
-    lda (ptr),y         ; pal 0..2
-    sta woff
-    ; shift = (vmc&1)*2 + (vmr&1)*4
-    lda tpy
-    and #1
-    asl a
-    sta woff2
-    lda tpx
-    and #1
-    asl a
-    asl a
-    clc
-    adc woff2
-    tax                 ; X = shift count
-    lda woff
-    beq @noshift        ; pal 0 contributes nothing
-@shl:
-    cpx #0
-    beq @doneshift
-    asl a
-    dex
-    jmp @shl
-@doneshift:
-    sta woff            ; pal << shift
-@noshift:
-    ; cell index = (vmr>>1)*8 + (vmc>>1)
-    lda tpx
-    lsr a
-    asl a
-    asl a
-    asl a
-    sta woff2
-    lda tpy
-    lsr a
-    clc
-    adc woff2
-    tax
-    lda attr_shadow_l,x
-    ora woff
-    sta attr_shadow_l,x
-    inc tpy
-    lda tpy
-    cmp #16
-    beq @nvmr
-    jmp @vmc
-@nvmr:
-    inc tpx
-    lda tpx
-    cmp #15
-    beq @write
-    jmp @vmr
-
-@write:
-    bit PPUSTATUS
-    lda #$23
-    sta PPUADDR
-    lda #$C0
-    sta PPUADDR
-    ldx #0
-@w:
-    lda attr_shadow_l,x
-    sta PPUDATA
-    inx
-    cpx #64
-    bne @w
+    sta mt_col
+    lda sg2_cnt
+    sta mt_row
+    lda ms_lo
+    sta ptr
+    lda ms_hi
+    sta ptr+1
+    jsr PutSeg
+    inc bs_cnt
+@done:
     rts
 .endproc
 
-; ExitFieldBox — leave the box view: repaint the scrolling field (camera-aware)
-; and restore the field scroll. Rendering off during the repaint (one blank
-; frame). Mirror of EnterFieldBox.
-.proc ExitFieldBox
-    jsr WaitFrame
-    lda #$00
-    sta PPUCTRL
-    sta PPUMASK
+; DrawBoxAttr -- set (open) / restore (close) the box region's attributes.
+; Battle: write the palette-3 window band to $23E8. Field: fold the box's 4
+; metatile-rows into the shadow per nibble (palette 3 on open, the map's palette
+; on close), then write the affected attribute rows from the shadow.
+.proc DrawBoxAttr
+    lda in_battle
+    beq @field
+    lda #$23
+    sta sd_dst_hi
+    lda #$E8
+    sta sd_dst_lo
+    lda #16
+    sta sd_cnt
+    lda #<winattr
+    sta sd_src_lo
+    lda #>winattr
+    sta sd_src_hi
+    lda #1
+    sta stream_req
+    rts
+@field:
+    lda draw_mode        ; open(0)->force palette 3 ; close(1)->restore the map
+    eor #1
+    sta attr_force
+    lda #0
+    sta woff             ; metatile-row index 0..3
+@mloop:
+    lda box_wrow
+    lsr a                ; world metatile-row = (box_wrow/2 + i) mod 30
+    clc
+    adc woff
+    cmp #30
+    bcc :+
+    sbc #30
+:   jsr MergeAttrRow
+    inc woff
+    lda woff
+    cmp #4
+    bne @mloop
+    lda box_nt_base      ; ar0 = box_nt_base / 4 (attribute row of box top)
+    lsr a
+    lsr a
+    sta bs_par
+    lda #0
+    sta bs_cnt           ; descriptor index
+    ldx #0
+@wloop:
+    txa
+    pha
+    clc
+    adc bs_par
+    and #7               ; attribute row (mod 8)
+    jsr QueueAttrRow
+    pla
+    tax
+    inx
+    cpx #3
+    bne @wloop
+    lda bs_cnt
+    sta stream_req
+    rts
+.endproc
 
-    jsr DrawField       ; repaint both nametables for the current camera
-    lda cam_ty
-    sta prev_cam_ty
-    lda #$00
-    sta box_view
-
-    bit PPUSTATUS
-    lda camX_lo
-    sta PPUSCROLL
-    lda scrollY
-    sta PPUSCROLL
-    lda #%10001000
-    ora camX_hi
-    sta PPUCTRL
-    lda #%00011110
-    sta PPUMASK
+; QueueAttrRow -- queue NT0 ($23C0) and NT1 ($27C0) writes (8 bytes each) for
+; attribute row A from the shadows, into descriptors bs_cnt and bs_cnt+1.
+.proc QueueAttrRow
+    asl a
+    asl a
+    asl a                ; ar * 8 = offset into an attribute table
+    sta nt_row_tmp
+    ldx bs_cnt           ; NT0
+    clc
+    adc #$C0
+    sta sd_dst_lo,x
+    lda #$23
+    sta sd_dst_hi,x
+    lda #<attr_shadow_l
+    clc
+    adc nt_row_tmp
+    sta sd_src_lo,x
+    lda #>attr_shadow_l
+    adc #0
+    sta sd_src_hi,x
+    lda #8
+    sta sd_cnt,x
+    inc bs_cnt
+    ldx bs_cnt           ; NT1
+    lda nt_row_tmp
+    clc
+    adc #$C0
+    sta sd_dst_lo,x
+    lda #$27
+    sta sd_dst_hi,x
+    lda #<attr_shadow_r
+    clc
+    adc nt_row_tmp
+    sta sd_src_lo,x
+    lda #>attr_shadow_r
+    adc #0
+    sta sd_src_hi,x
+    lda #8
+    sta sd_cnt,x
+    inc bs_cnt
     rts
 .endproc
 

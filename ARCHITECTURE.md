@@ -229,6 +229,13 @@ make that hold:
   `ExitFieldBox` repaints the scrolling layout and restores the camera. Each
   transition costs one blank frame (rendering off during the copy).
 
+`StreamRows` is **gated off** while `in_battle`/`box_view` is set, and both
+`EnterBattle`/`EnterFieldBox` clear `stream_req`. Otherwise an encounter (or
+menu) that opens on the same step that crosses a tile-row boundary would let the
+next NMI write a queued field row-stream onto the battle/box screen — an
+intermittent strip of map tiles (it only triggers when the opening step also
+crosses a 16px vertical boundary).
+
 -----
 
 ## Palettes (`pal_field`, `pal_battle`)

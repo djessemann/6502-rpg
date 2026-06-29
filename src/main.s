@@ -883,6 +883,9 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 ; nametable holds exactly 30 tile-rows, so world tile-row T lives in slot T%30.
 ; ----------------------------------------------------------------------------
 .proc StreamRows
+    lda in_battle       ; never stream field rows onto the battle/box screen
+    ora box_view
+    bne @none
     lda cam_ty
     cmp prev_cam_ty
     beq @none           ; no crossing this frame
@@ -1809,6 +1812,8 @@ slot_dy:
 
     lda #1
     sta in_battle       ; set before NMI resumes so it uses battle scroll (0,0)
+    lda #0
+    sta stream_req      ; discard any field row-stream queued this frame
 
     bit PPUSTATUS       ; reset scroll before rendering resumes
     lda #$00
@@ -2403,6 +2408,8 @@ slot_dy:
     jsr BuildViewAttr   ; NT0 attributes for the current view
     lda #1
     sta box_view
+    lda #0
+    sta stream_req      ; discard any field row-stream queued this frame
 
     bit PPUSTATUS       ; box view is shown at scroll (0,0)
     lda #$00

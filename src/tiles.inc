@@ -6,14 +6,15 @@ HERO_UP_TILE   = $04
 HERO_SIDE_TILE = $08
 
 ; Background tiles (pattern table 0).
-TILE_NPC_LO = $08   ; first NPC tile (all facings)
-TILE_NPC_HI = $17   ; last NPC tile (solid range)
-ENEMY_TILE_BASE = $69
-ARROW_TILE = $22   ; 'more text' prompt
-WIN_BOTTOM_TILE = $1F   ; bottom-border tile (restores under the prompt)
-DIGIT_TILE = $29   ; '0'; digit d -> DIGIT_TILE + d
-CURSOR_TILE = $21   ; menu cursor (right triangle)
+ENEMY_TILE_BASE = $72
+ARROW_TILE = $2B   ; 'more text' prompt
+WIN_BOTTOM_TILE = $28   ; bottom-border tile (restores under the prompt)
+DIGIT_TILE = $32   ; '0'; digit d -> DIGIT_TILE + d
+CURSOR_TILE = $2A   ; menu cursor (right triangle)
 
+; World geometry (16px metatiles): 2 screens wide, 1 tall.
+WORLD_W = 32
+WORLD_H = 15
 ; Text window: full-width box at nametable rows 20-27.
 WIN_STEPS = 9
 TEXT_COLS = 30

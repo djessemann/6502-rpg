@@ -17,7 +17,7 @@ Build: `make` → `6502rpg.nes` (NROM, 32KB PRG + 8KB CHR). Art: regenerate with
 | `src/nes.inc`         | Hardware register constants.                                  |
 | `src/main.s`          | Everything: boot, main loop, NMI, state machine, routines, palettes, tables. |
 | `src/chr.s`           | **Generated.** CHR-ROM tile data (BG table 0, hero table 1). |
-| `src/field.s`         | **Generated.** `fieldmap`, `fieldattr`, `winmap` (exported).  |
+| `src/field.s`         | **Generated.** Two-screen world: `fieldmap`/`fieldattr` (left screen), `ntmap_r`/`ntattr_r` (right screen), `worldsolid` (per-metatile collision), `winmap`. |
 | `src/tiles.inc`       | **Generated.** Tile/geometry constants and message ids (`HERO_*_TILE`, `ENEMY_TILE_BASE`, `WIN_STEPS`, `MSG_*`). |
 | `src/messages.s`      | **Generated.** `msg_table` + wrapped/paginated message byte streams. |
 | `tools/gen_assets.py` | Dev-time art source-of-truth → emits `chr.s` + `field.s`. Not in the `make` path. |
@@ -43,16 +43,14 @@ Key zeropage: `frame_count`($00), `ptr`($01-02, general 16-bit pointer),
 
 ## CHR / tile index map
 
-Pattern table 0 (background, `$0000`):
-
-```
-$00         blank
-$01-$07     grass, flower, path, tree, wall, bush, water
-$08-$17     NPC, 4 facings x 2x2 (down,up,left,right; palette 2)
-$18-$20     window frame (TL,T,TR,L,FILL,R,BL,B,BR)
-$21-$27     font glyphs (! E H L O R T — only what "HELLO THERE!" needs)
-$28-$37     enemy (4x4 = 32x32, palette 1 in battle)
-```
+Pattern table 0 (background, `$0000`) — ids are assigned by the generator, in
+order: blank `$00`; then **terrain metatiles** (grass, flower, path, tree, wall,
+bush, water — each 4 subtiles, pixel-doubled from 8px art); the **NPC** metatile
+(4 subtiles, its authored facing); the window frame (9 tiles); the font glyphs;
+the enemy (4×4). `main.s` hardcodes no terrain ids — the nametables reference
+them directly and collision uses `worldsolid` — so only `ENEMY_TILE_BASE`,
+`WIN_BOTTOM_TILE`, `ARROW_TILE`, `DIGIT_TILE`, `CURSOR_TILE` are emitted to
+`tiles.inc` for the (gated) text/battle code.
 
 Pattern table 1 (sprites, `$1000`): hero, 3 facings x 2x2 — down `$00`, up `$04`,
 side `$08` (left = side flipped at draw time). `PPUCTRL` selects BG table 0 /
@@ -169,19 +167,39 @@ in RAM (`CopyFrag` + `AppendNumber` → `DIGIT_TILE`) and rendered the same way.
 Index 0 = hero (only one used so far; arrays sized `MAX_ENT`=8). Hero entity data
 is preserved across battle, so `ExitBattle` returns it to the prior position.
 
+## World, camera & scrolling (Milestone 1: 2-screen horizontal slice)
+
+The world is **16px metatiles**, `WORLD_W`×`WORLD_H` = 32×15 = **2 screens wide,
+1 tall** (512×240 px), and wraps on both axes (a torus). Each metatile is four
+8px CHR tiles (TL,TR,BL,BR); terrain is the old 8px art **pixel-doubled** by the
+generator. The two screens are pre-expanded into the two nametables (left→`$2000`,
+right→`$2400`); the iNES header uses **vertical mirroring** so they sit
+side-by-side for horizontal scroll. `DrawField` paints both (`BlitScreen` ×2 +
+two attr tables) with rendering off.
+
+**Camera:** `UpdateCamera` (run every frame) keeps the hero at screen center:
+`camX = heroWorldX − 128 (mod 512)`, split into `camX_lo` (PPUSCROLL) and
+`camX_hi` (PPUCTRL base-nametable bit0). NMI writes them after the VBUF flush,
+with Y scroll fixed at 0. The hero is drawn at a **fixed screen X = 128**
+(`BuildOAM`); the world scrolls beneath it (Dragon-Quest style).
+
 ## Movement & collision
 
-Grid is 16px cells (16 wide x 15 tall); the map is 8px tiles. `TryStep` picks
-the target cell, **wrapping at the edges** (no border — the world is a torus),
-and starts a slide if that cell isn't solid. A cell is solid if **any** of its
-four underlying 8px tiles is solid (wall/water/NPC). `CellSolid`→`CheckTile`→
-`MapTile`.
+Grid is 16px cells = one metatile each (32 wide × 15 tall). `TryStep` picks the
+target cell, **wrapping at the edges** (`WORLD_W`/`WORLD_H`), and starts a slide
+if it isn't solid. Collision is a single lookup: `CellSolid` reads
+`worldsolid[gy*WORLD_W + gx]` (1 = solid: wall/water/tree/NPC).
 
-`StepMove` is **direction-based**: it moves the pixel position `MOVE_SPEED`(2)
-px/frame in `ent_dir`, wrapping X mod 256 (world width) and Y mod 240 (world
-height); after 16px it snaps the grid cell from the pixel position. The hero
-draws split across a seam: `BuildOAM` lets each tile's OAM X wrap by byte
-arithmetic and wraps OAM Y at 240, so walking off one edge slides in the other.
+`StepMove` is **direction-based**, `MOVE_SPEED`(2) px/frame in `ent_dir`. World X
+is **16-bit** (`ent_px` lo + `ent_pxh` hi), wrapping mod 512; Y is 8-bit, mod 240.
+After 16px it snaps the grid cell from the world position
+(`gx = (pxh<<4) | (px>>4)`).
+
+> **Gated for M1:** the A-menu, encounters, and battle are temporarily disabled
+> on the field (their state handlers remain). The text box draws at fixed
+> nametable addresses and must be made camera-aware before it can reopen under a
+> scrolling camera — that's a later milestone, along with the full 2×2 (4-screen)
+> world and vertical row/column streaming.
 
 -----
 

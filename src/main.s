@@ -13,7 +13,7 @@
 .include "nes.inc"
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
-.import fieldmap, fieldattr, winmap, msg_table
+.import fieldmap, fieldattr, ntmap_r, ntattr_r, worldsolid, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
 .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
 .import frag_LBL_ATK, frag_LBL_POWER
@@ -82,10 +82,7 @@ ST_MOVE    = 1
 
 MOVE_SPEED = 2          ; pixels/frame while sliding (16 / 2 = 8 frames per cell)
 
-; Solid (impassable) field tiles. TILE_NPC_LO/HI come from tiles.inc.
-TILE_TREE  = $04
-TILE_WALL  = $05
-TILE_WATER = $07
+; WORLD_W / WORLD_H (metatile grid dimensions) come from tiles.inc.
 
 ; Controller button bits (after the shift-in read order below)
 BTN_A      = %10000000
@@ -127,6 +124,10 @@ draw_mode:    .res 1   ; 0 = opening (draw window), 1 = closing (restore field)
 vpkt_lo:      .res 1   ; packet being built: PPU address low / count
 vpkt_cnt:     .res 1
 
+; camera (NMI reads these to set the scroll position each frame)
+camX_lo:      .res 1   ; horizontal scroll low 8 bits
+camX_hi:      .res 1   ; horizontal scroll bit 8 -> PPUCTRL base-nametable bit0
+
 ; metasprite build scratch
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
@@ -167,10 +168,11 @@ oam:          .res 256
 ; Entities — struct-of-arrays, indexed by entity number (X register).
 ; ----------------------------------------------------------------------------
 .segment "BSS"
-ent_gx:    .res MAX_ENT   ; grid cell X (16px cells, 0..15)
-ent_gy:    .res MAX_ENT   ; grid cell Y (0..14)
-ent_px:    .res MAX_ENT   ; sprite pixel X (top-left)
-ent_py:    .res MAX_ENT   ; sprite pixel Y (top-left)
+ent_gx:    .res MAX_ENT   ; grid cell X (16px cells, 0..WORLD_W-1)
+ent_gy:    .res MAX_ENT   ; grid cell Y (0..WORLD_H-1)
+ent_px:    .res MAX_ENT   ; world pixel X, low byte (top-left)
+ent_pxh:   .res MAX_ENT   ; world pixel X, high bit (world is 512px wide)
+ent_py:    .res MAX_ENT   ; world pixel Y (top-left)
 ent_dir:   .res MAX_ENT   ; facing direction
 ent_state: .res MAX_ENT   ; ST_IDLE / ST_MOVE
 ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
@@ -247,6 +249,7 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     jsr ReadInput
     jsr VBufClear       ; default: no nametable update this frame
     jsr UpdateGame      ; hero logic and/or a window draw step
+    jsr UpdateCamera    ; recompute scroll from the hero's world position
     ; The hero is on screen everywhere except the battle screen.
     lda in_battle
     bne @hide
@@ -301,12 +304,16 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     bne @flush
 @noflush:
 
-    ; Reset scroll after any potential $2006 write this frame.
+    ; Set scroll after any potential $2006 write this frame. The camera's
+    ; high bit selects which nametable is top-left (horizontal scroll spans the
+    ; two side-by-side screens). Vertical scroll is fixed at 0 (world is 1 tall).
     bit PPUSTATUS
+    lda camX_lo
+    sta PPUSCROLL
     lda #$00
     sta PPUSCROLL
-    sta PPUSCROLL
     lda #%10001000
+    ora camX_hi
     sta PPUCTRL
 
     jsr SoundTick       ; called every frame, including lag frames (stub)
@@ -339,17 +346,21 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 .proc InitGame
     ldx #HERO
     lda #4
-    sta ent_gx,x        ; start on open grass, left-of-center
-    lda #8
+    sta ent_gx,x        ; start on open grass, left screen
+    lda #9
     sta ent_gy,x
     lda #4 * 16
-    sta ent_px,x        ; pixel position = cell * 16
-    lda #8 * 16
+    sta ent_px,x        ; world pixel position = cell * 16
+    lda #0
+    sta ent_pxh,x       ; left screen -> high bit clear
+    lda #9 * 16
     sta ent_py,x
     lda #DIR_DOWN
     sta ent_dir,x
     lda #ST_IDLE
     sta ent_state,x
+
+    jsr UpdateCamera    ; seed the camera before the first frame
 
     lda #0              ; start equipped with weapon 0 (Club)
     sta equipped
@@ -446,9 +457,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda ent_dir,x
     cmp #DIR_UP
     bne @nu
-    lda newgy           ; up: gy-1, wrap 0 -> 14
+    lda newgy           ; up: gy-1, wrap 0 -> WORLD_H-1
     bne @up_dec
-    lda #14
+    lda #WORLD_H - 1
     sta newgy
     jmp @check
 @up_dec:
@@ -457,8 +468,8 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 @nu:
     cmp #DIR_DOWN
     bne @nd
-    lda newgy           ; down: gy+1, wrap 14 -> 0
-    cmp #14
+    lda newgy           ; down: gy+1, wrap WORLD_H-1 -> 0
+    cmp #WORLD_H - 1
     bcc @dn_inc
     lda #0
     sta newgy
@@ -469,17 +480,17 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 @nd:
     cmp #DIR_LEFT
     bne @nl
-    lda newgx           ; left: gx-1, wrap 0 -> 15
+    lda newgx           ; left: gx-1, wrap 0 -> WORLD_W-1
     bne @lf_dec
-    lda #15
+    lda #WORLD_W - 1
     sta newgx
     jmp @check
 @lf_dec:
     dec newgx
     jmp @check
 @nl:
-    lda newgx           ; right: gx+1, wrap 15 -> 0
-    cmp #15
+    lda newgx           ; right: gx+1, wrap WORLD_W-1 -> 0
+    cmp #WORLD_W - 1
     bcc @rt_inc
     lda #0
     sta newgx
@@ -503,25 +514,40 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; Slide the hero MOVE_SPEED pixels in ent_dir. Pixel position is canonical and
-; wraps (X mod 256 = world width, Y mod 240 = world height); when 16px have been
-; covered, snap the grid cell from the pixel position. X = entity index.
+; Slide the hero MOVE_SPEED pixels in ent_dir. World position is canonical and
+; wraps: X is 16-bit (mod 512 = two-screen world width), Y is 8-bit (mod 240 =
+; world height). When 16px have been covered, snap the grid cell from the world
+; position. X = entity index.
 .proc StepMove
     lda ent_dir,x
     cmp #DIR_LEFT
     bne @nl
-    lda ent_px,x        ; left: byte wrap at 256
+    lda ent_px,x        ; left: 16-bit subtract, wrap below 0 -> 510
     sec
     sbc #MOVE_SPEED
     sta ent_px,x
+    lda ent_pxh,x
+    sbc #0
+    sta ent_pxh,x
+    bpl @tick           ; >= 0 (high bit clear) -> fine
+    clc
+    adc #2              ; underflowed ($FF -> $01): + 512
+    sta ent_pxh,x
     jmp @tick
 @nl:
     cmp #DIR_RIGHT
     bne @nu
-    lda ent_px,x        ; right: byte wrap at 256
+    lda ent_px,x        ; right: 16-bit add, wrap at 512 -> 0
     clc
     adc #MOVE_SPEED
     sta ent_px,x
+    lda ent_pxh,x
+    adc #0
+    sta ent_pxh,x
+    cmp #2              ; reached 512 (high byte = 2)?
+    bcc @tick
+    lda #0
+    sta ent_pxh,x       ; wrap to world X = 0
     jmp @tick
 @nu:
     cmp #DIR_UP
@@ -553,13 +579,21 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     sbc #MOVE_SPEED
     sta ent_timer,x
     bne @done
-    lda ent_px,x        ; aligned again: cell = pixel / 16
+    ; aligned again: gx = worldX / 16 = (pxh*16) | (px >> 4)
+    lda ent_pxh,x
+    asl a
+    asl a
+    asl a
+    asl a
+    sta ent_gx,x        ; pxh * 16 (0 or 16)
+    lda ent_px,x
     lsr a
     lsr a
     lsr a
     lsr a
+    ora ent_gx,x
     sta ent_gx,x
-    lda ent_py,x
+    lda ent_py,x        ; gy = worldY / 16
     lsr a
     lsr a
     lsr a
@@ -572,62 +606,13 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; CellSolid — is the 16px grid cell (cs_gx,cs_gy) blocked? A cell spans a 2x2
-; block of 8px map tiles; it is solid if ANY of those four tiles is solid.
-; Returns carry set if solid. Preserves X.
+; CellSolid — is the metatile cell (cs_gx,cs_gy) blocked? One grid cell is one
+; 16px metatile, so this is a single lookup in worldsolid[cs_gy*WORLD_W+cs_gx]
+; (1 = solid). Returns carry set if solid. Preserves X.
 .proc CellSolid
-    lda cs_gx
-    asl a
-    sta mt_col          ; base map col = gx * 2
-    lda cs_gy
-    asl a
-    sta mt_row          ; base map row = gy * 2
-
-    jsr CheckTile       ; (col,   row)
-    bcs @solid
-    inc mt_col
-    jsr CheckTile       ; (col+1, row)
-    bcs @solid
-    inc mt_row
-    jsr CheckTile       ; (col+1, row+1)
-    bcs @solid
-    dec mt_col
-    jsr CheckTile       ; (col,   row+1)
-    bcs @solid
-    clc
-    rts
-@solid:
-    sec
-    rts
-.endproc
-
-; CheckTile — read map tile (mt_col,mt_row); carry set if it is solid.
-; Preserves X.
-.proc CheckTile
-    jsr MapTile
-    cmp #TILE_TREE
-    beq @solid
-    cmp #TILE_WALL
-    beq @solid
-    cmp #TILE_WATER
-    beq @solid
-    cmp #TILE_NPC_LO    ; any NPC facing tile is solid
-    bcc @walk
-    cmp #TILE_NPC_HI + 1
-    bcc @solid
-@walk:
-    clc
-    rts
-@solid:
-    sec
-    rts
-.endproc
-
-; MapTile — fetch fieldmap[mt_row*32 + mt_col] into A. Preserves X.
-.proc MapTile
     lda #0
     sta ptr+1
-    lda mt_row
+    lda cs_gy           ; cs_gy * 32 (WORLD_W) -> ptr+1:A
     asl a
     rol ptr+1
     asl a
@@ -637,19 +622,24 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     asl a
     rol ptr+1
     asl a
-    rol ptr+1           ; ptr+1:A = mt_row * 32
+    rol ptr+1
     clc
-    adc mt_col
+    adc cs_gx
     bcc :+
     inc ptr+1
 :   clc
-    adc #<fieldmap
+    adc #<worldsolid
     sta ptr
     lda ptr+1
-    adc #>fieldmap
+    adc #>worldsolid
     sta ptr+1
     ldy #0
     lda (ptr),y
+    beq @clear
+    sec                 ; nonzero -> solid
+    rts
+@clear:
+    clc
     rts
 .endproc
 
@@ -697,8 +687,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda sprattr
     sta oam+2,y
 
-    ; X (screen) = hero px + slot_dx
-    lda ent_px
+    ; X (screen) = 128 + slot_dx. The camera keeps the hero centered, so its
+    ; screen X is fixed and the world scrolls under it (Dragon-Quest style).
+    lda #128
     clc
     adc slot_dx,x
     sta oam+3,y
@@ -710,6 +701,25 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     inx
     cpx #4
     bne @slot
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; UpdateCamera — center the camera on the hero: camX = heroWorldX - 128, taken
+; mod 512 (the world wraps). The 9-bit result is split into camX_lo (low 8 bits,
+; the PPUSCROLL value) and camX_hi (bit 8, the base-nametable select). With the
+; hero held at screen X = 128, the world scrolls smoothly beneath it.
+; ----------------------------------------------------------------------------
+.proc UpdateCamera
+    ldx #HERO
+    lda ent_px,x
+    sec
+    sbc #128
+    sta camX_lo
+    lda ent_pxh,x
+    sbc #0
+    and #$01            ; mod 512: keep only bit 8 (handles the borrow case)
+    sta camX_hi
     rts
 .endproc
 
@@ -757,28 +767,10 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 :
 
     ; --- GS_FIELD ---
+    ; Milestone 1 (scrolling overworld): walking only. The A-menu and encounter
+    ; triggers are gated until the text box is made camera-aware; their handlers
+    ; (@encounter, @bwait, @menu, ...) remain below for that re-integration.
     jsr UpdateHero
-
-    ; Interactions and encounters only resolve when the hero is grid-aligned.
-    ldx #HERO
-    lda ent_state,x
-    cmp #ST_IDLE
-    bne @ret
-
-    ; Encounter trigger: debug button (Select) or the step counter.
-    lda pad1_new
-    and #BTN_SELECT
-    bne @encounter
-    lda step_count
-    cmp #ENC_STEPS
-    bcs @encounter
-
-    ; Otherwise: A opens the command menu (Talk / Equip).
-    lda pad1_new
-    and #BTN_A
-    beq @ret
-    lda #MENU_CMD
-    jsr OpenMenuBox
 @ret:
     rts
 
@@ -1761,23 +1753,66 @@ slot_dy:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; DrawField — copy the one-screen map (960 bytes) to nametable 0 ($2000) and
-; the attribute table (64 bytes) to $23C0. Init-time only (rendering off).
+; DrawField — paint the whole two-screen world: the left screen to nametable 0
+; ($2000, attrs $23C0) and the right screen to nametable 1 ($2400, attrs $27C0).
+; Init-time / full-redraw only (rendering off).
 ; ----------------------------------------------------------------------------
 .proc DrawField
-    ; Nametable tiles: 960 bytes = 3 full pages + 192.
+    ; Left screen tiles -> $2000.
     bit PPUSTATUS
     lda #$20
     sta PPUADDR
     lda #$00
     sta PPUADDR
-
     lda #<fieldmap
     sta ptr
     lda #>fieldmap
     sta ptr+1
+    jsr BlitScreen
 
-    ldx #$03            ; 3 full 256-byte pages
+    ; Left attributes -> $23C0.
+    lda #$23
+    sta PPUADDR
+    lda #$C0
+    sta PPUADDR
+    ldx #$00
+@al:
+    lda fieldattr,x
+    sta PPUDATA
+    inx
+    cpx #64
+    bne @al
+
+    ; Right screen tiles -> $2400.
+    lda #$24
+    sta PPUADDR
+    lda #$00
+    sta PPUADDR
+    lda #<ntmap_r
+    sta ptr
+    lda #>ntmap_r
+    sta ptr+1
+    jsr BlitScreen
+
+    ; Right attributes -> $27C0.
+    lda #$27
+    sta PPUADDR
+    lda #$C0
+    sta PPUADDR
+    ldx #$00
+@ar:
+    lda ntattr_r,x
+    sta PPUDATA
+    inx
+    cpx #64
+    bne @ar
+    rts
+.endproc
+
+; BlitScreen — copy 960 nametable bytes from (ptr) to PPUDATA (PPUADDR preset).
+; 960 = 3 full 256-byte pages + 192. Clobbers ptr, X, Y, A.
+.proc BlitScreen
+    ldx #$03
 @page:
     ldy #$00
 @byte:
@@ -1788,27 +1823,13 @@ slot_dy:
     inc ptr+1
     dex
     bne @page
-
-    ldy #$00            ; remaining 192 bytes (ptr now at fieldmap+768)
+    ldy #$00            ; remaining 192 bytes (ptr now at base+768)
 @tail:
     lda (ptr),y
     sta PPUDATA
     iny
     cpy #192
     bne @tail
-
-    ; Attribute table at $23C0: 64 bytes.
-    lda #$23
-    sta PPUADDR
-    lda #$C0
-    sta PPUADDR
-    ldx #$00
-@attr:
-    lda fieldattr,x
-    sta PPUDATA
-    inx
-    cpx #64
-    bne @attr
     rts
 .endproc
 

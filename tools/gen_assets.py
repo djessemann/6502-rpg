@@ -516,42 +516,64 @@ def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = os.path.join(here, "src")
 
-    # --- assemble the ordered background tile table ---
-    font_chars = sorted(FONT.keys())
-    font_id = {ch: F_BASE + i for i, ch in enumerate(font_chars)}
+    # --- assemble the ordered background tile table (16x16 metatiles) ---
+    # Terrain is authored as 8x8 art, pixel-doubled to 16x16 and split into the
+    # four CHR subtiles (TL,TR,BL,BR) of one metatile. The hero and NPC are
+    # already 16x16. Window/font/enemy tiles stay 8x8 (used by the text box).
+    bg = {0: TILES[T_BLANK]}        # tile $00 = blank (palette-independent)
+    nid = 1
 
-    bg = {}
-    bg.update(TILES)
-    # NPC four facings (left is mirrored from the right-facing "side" art).
-    npc_blocks = {
-        NPC_DOWN: NPC_VIEWS["down"],
-        NPC_UP: NPC_VIEWS["up"],
-        NPC_RIGHT: NPC_VIEWS["side"],
-        NPC_LEFT: mirror_h(NPC_VIEWS["side"]),
-    }
-    for base, block in npc_blocks.items():
-        for i, tile in enumerate(split16(block)):
-            bg[base + i] = tile
-    # Window frame: author TL + top/left edges + fill; mirror for the rest.
+    TERRAIN = [T_GRASS, T_FLOWER, T_PATH, T_TREE, T_WALL, T_BUSH, T_WATER]
+    meta_terrain = {}
+    for t in TERRAIN:
+        ids = []
+        for sub in split16(double(TILES[t])):
+            bg[nid] = sub
+            ids.append(nid)
+            nid += 1
+        meta_terrain[t] = ids
+
+    # NPC metatile: the one authored facing it stands in (left = mirrored side).
+    if NPC_FACING == "left":
+        npc_block = mirror_h(NPC_VIEWS["side"])
+    elif NPC_FACING == "right":
+        npc_block = NPC_VIEWS["side"]
+    else:
+        npc_block = NPC_VIEWS[NPC_FACING]
+    npc_ids = []
+    for sub in split16(npc_block):
+        bg[nid] = sub
+        npc_ids.append(nid)
+        nid += 1
+
+    # Window frame (8x8): author TL + top/left edges + fill; mirror the rest.
     tl = to_digits(WIN_TL_ART)
     top = to_digits(WIN_T_ART)
     left = to_digits(WIN_L_ART)
-    bg[W_TL] = tl
-    bg[W_T] = top
-    bg[W_TR] = mirror_h(tl)
-    bg[W_L] = left
-    bg[W_FILL] = to_digits(WIN_FILL_ART)
-    bg[W_R] = mirror_h(left)
-    bg[W_BL] = mirror_v(tl)
-    bg[W_B] = mirror_v(top)
-    bg[W_BR] = mirror_v(mirror_h(tl))
-    for ch in font_chars:
-        bg[font_id[ch]] = glyph(ch)
-    e_base = F_BASE + len(font_chars)          # enemy tiles follow the font
-    for i, tile in enumerate(split_grid(double(ENEMY16), 4)):
-        bg[e_base + i] = tile
+    win_art = [("TL", tl), ("T", top), ("TR", mirror_h(tl)),
+               ("L", left), ("FILL", to_digits(WIN_FILL_ART)), ("R", mirror_h(left)),
+               ("BL", mirror_v(tl)), ("B", mirror_v(top)), ("BR", mirror_v(mirror_h(tl)))]
+    W_ids = {}
+    for name, art in win_art:
+        bg[nid] = art
+        W_ids[name] = nid
+        nid += 1
 
-    last_bg = max(bg)
+    # Font glyphs.
+    font_chars = sorted(FONT.keys())
+    font_id = {}
+    for ch in font_chars:
+        bg[nid] = glyph(ch)
+        font_id[ch] = nid
+        nid += 1
+
+    # Enemy (32x32 = 4x4 tiles).
+    e_base = nid
+    for tile in split_grid(double(ENEMY16), 4):
+        bg[nid] = tile
+        nid += 1
+
+    last_bg = nid - 1
     bg_bytes = []
     for tid in range(last_bg + 1):
         bg_bytes += to_chr(bg.get(tid, ["00000000"] * 8))
@@ -579,87 +601,104 @@ def main():
             row = ", ".join(f"${b:02X}" for b in hero_bytes[i:i + 16])
             f.write(f"    .byte {row}   ; hero tile ${i // 16:02X}\n")
 
-    # --- build the field map ---
-    # No border: the world wraps (walk off an edge -> appear on the opposite
-    # side), so the paths run all the way to the screen edges.
-    W, H = 32, 30
-    m = [[T_GRASS] * W for _ in range(H)]
-    for y in range(3, 8):
-        for x in range(3, 9):
-            m[y][x] = T_WATER
-    for y in range(H):
-        m[y][16] = T_PATH
-    for x in range(W):
-        m[22][x] = T_PATH
-    for x in range(20, 26):
-        m[3][x] = T_WALL
-        m[7][x] = T_WALL
-    for y in range(3, 8):
-        m[y][20] = T_WALL
-        m[y][25] = T_WALL
-    for (x, y) in [(5, 12), (9, 18), (13, 25), (27, 10), (29, 19), (23, 24), (6, 26)]:
-        m[y][x] = T_FLOWER
-    for (x, y) in [(11, 11), (28, 6), (4, 20), (19, 27), (26, 14), (8, 9)]:
-        m[y][x] = T_BUSH
+    # --- build the metatile world: 32 x 15 metatiles = 2 screens wide,
+    # 1 screen tall (512 x 240 px). The world wraps on both axes (a torus).
+    WM, HM = 32, 15
+    world = [[T_GRASS] * WM for _ in range(HM)]
+    # pond
+    for y in range(2, 5):
+        for x in range(3, 7):
+            world[y][x] = T_WATER
+    # roads: a vertical road on the screen seam, a horizontal road across
+    for y in range(HM):
+        world[y][15] = T_PATH
+    for x in range(WM):
+        world[7][x] = T_PATH
+    # a walled hut on the right screen (doorway in the bottom wall)
+    for x in range(20, 25):
+        world[3][x] = T_WALL
+        world[6][x] = T_WALL
+    for y in range(3, 7):
+        world[y][20] = T_WALL
+        world[y][24] = T_WALL
+    world[6][22] = T_PATH
+    # a small tree cluster + scattered flora
+    for (x, y) in [(8, 1), (9, 1), (8, 2), (27, 13), (28, 13), (28, 12)]:
+        world[y][x] = T_TREE
+    for (x, y) in [(9, 10), (26, 11), (3, 12), (28, 2), (12, 4), (6, 10)]:
+        world[y][x] = T_FLOWER
+    for (x, y) in [(11, 2), (29, 8), (2, 6), (18, 12), (25, 9), (13, 10)]:
+        world[y][x] = T_BUSH
 
-    # stamp the NPC (2x2 background tiles) at its grid cell, in its facing
-    npc_base = NPC_FACE[NPC_FACING]
-    bx, by = NPC_GX * 2, NPC_GY * 2
-    m[by][bx], m[by][bx + 1] = npc_base + 0, npc_base + 1
-    m[by + 1][bx], m[by + 1][bx + 1] = npc_base + 2, npc_base + 3
+    SOLID = {T_TREE, T_WALL, T_WATER}
 
-    def palette_of(tile):
-        if tile == T_WATER:
-            return 1
-        if NPC_DOWN <= tile <= NPC_RIGHT + 3:   # any NPC facing tile
+    def cell_ids(mx, my):
+        if (mx, my) == (NPC_GX, NPC_GY):
+            return npc_ids
+        return meta_terrain[world[my][mx]]
+
+    def cell_pal(mx, my):
+        if (mx, my) == (NPC_GX, NPC_GY):
             return 2
-        return 0
+        return 1 if world[my][mx] == T_WATER else 0
 
-    def attr_table(grid):
+    def expand_screen(x0):
+        """Metatile cols x0..x0+15 -> (960-byte tilemap, 64-byte attr table)."""
+        tiles = [[0] * 32 for _ in range(30)]
+        for my in range(HM):
+            for sx in range(16):
+                t0, t1, t2, t3 = cell_ids(x0 + sx, my)
+                tiles[my * 2][sx * 2] = t0
+                tiles[my * 2][sx * 2 + 1] = t1
+                tiles[my * 2 + 1][sx * 2] = t2
+                tiles[my * 2 + 1][sx * 2 + 1] = t3
+        flat = [tiles[y][x] for y in range(30) for x in range(32)]
         attr = [0] * 64
-        for ay in range(8):
-            for ax in range(8):
-                byte = 0
-                for q in range(4):
-                    qx, qy = q & 1, q >> 1
-                    pal = 0
-                    for ty in range(2):
-                        for tx in range(2):
-                            x = ax * 4 + qx * 2 + tx
-                            y = ay * 4 + qy * 2 + ty
-                            if 0 <= y < H and 0 <= x < W:
-                                pal = max(pal, palette_of(grid[y][x]))
-                    byte |= pal << (q * 2)
-                attr[ay * 8 + ax] = byte
-        return attr
+        for my in range(HM):
+            for sx in range(16):
+                pal = cell_pal(x0 + sx, my)
+                ab = (my // 2) * 8 + (sx // 2)
+                q = (sx & 1) + (my & 1) * 2
+                attr[ab] |= pal << (q * 2)
+        return flat, attr
 
-    flat = [m[y][x] for y in range(H) for x in range(W)]
-    attr = attr_table(m)
+    nt_l, attr_l = expand_screen(0)        # left screen  -> $2000
+    nt_r, attr_r = expand_screen(16)       # right screen -> $2400
+
+    # Per-metatile collision map (1 = solid), indexed [my*WM + mx].
+    worldsolid = []
+    for my in range(HM):
+        for mx in range(WM):
+            solid = world[my][mx] in SOLID or (mx, my) == (NPC_GX, NPC_GY)
+            worldsolid.append(1 if solid else 0)
 
     # --- build the window SHELL: frame + blank interior, 32 wide x 8 tall ---
     # Full-width box at nametable rows 20-27 (so the palette-3 band aligns), with
     # the frame at the very edge. The runtime renders text into the blank
     # interior (rows 22-25), so no text is baked here.
     IN_W = 30
-    pad_row = [W_L] + [W_FILL] * IN_W + [W_R]
-    winmap = [W_TL] + [W_T] * IN_W + [W_TR]     # row 0: top border
+    pad_row = [W_ids["L"]] + [W_ids["FILL"]] * IN_W + [W_ids["R"]]
+    winmap = [W_ids["TL"]] + [W_ids["T"]] * IN_W + [W_ids["TR"]]   # row 0: top border
     winmap += pad_row                            # row 1: top padding
     winmap += pad_row * 4                         # rows 2-5: 4 blank text lines
     winmap += pad_row                            # row 6: bottom padding
-    winmap += [W_BL] + [W_B] * IN_W + [W_BR]     # row 7: bottom border
+    winmap += [W_ids["BL"]] + [W_ids["B"]] * IN_W + [W_ids["BR"]]  # row 7: bottom border
 
     # window draw steps: 4 clear (black) + 1 attribute + 4 content, 64 tiles/step.
-    # Transitions route through an all-black region so no tile is ever shown
-    # under the wrong palette (black = value 0 is palette-independent).
     win_steps = 9
 
     with open(os.path.join(src, "field.s"), "w") as f:
         f.write("; field.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
-        f.write("; One-screen field map + attribute table, and the window shell.\n\n")
-        f.write(".export fieldmap, fieldattr, winmap\n\n")
+        f.write("; Two-screen scrolling world: left + right nametables, a per-metatile\n")
+        f.write("; collision map (worldsolid), and the text window shell.\n\n")
+        f.write(".export fieldmap, fieldattr, ntmap_r, ntattr_r, worldsolid, winmap\n\n")
         f.write('.segment "RODATA"\n')
-        f.write(fmt_bytes("fieldmap", flat, 32) + "\n\n")
-        f.write(fmt_bytes("fieldattr", attr, 16) + "\n\n")
+        f.write("; fieldmap/fieldattr = LEFT screen ($2000); ntmap_r/ntattr_r = RIGHT ($2400)\n")
+        f.write(fmt_bytes("fieldmap", nt_l, 32) + "\n\n")
+        f.write(fmt_bytes("fieldattr", attr_l, 16) + "\n\n")
+        f.write(fmt_bytes("ntmap_r", nt_r, 32) + "\n\n")
+        f.write(fmt_bytes("ntattr_r", attr_r, 16) + "\n\n")
+        f.write(fmt_bytes("worldsolid", worldsolid, 32) + "\n\n")
         f.write(fmt_bytes("winmap", winmap, 32) + "\n")
 
     # --- messages + fragments ---
@@ -700,13 +739,14 @@ def main():
         f.write(f"HERO_UP_TILE   = ${HERO_UP:02X}\n")
         f.write(f"HERO_SIDE_TILE = ${HERO_SIDE:02X}\n\n")
         f.write("; Background tiles (pattern table 0).\n")
-        f.write(f"TILE_NPC_LO = ${NPC_DOWN:02X}   ; first NPC tile (all facings)\n")
-        f.write(f"TILE_NPC_HI = ${NPC_RIGHT + 3:02X}   ; last NPC tile (solid range)\n")
         f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
         f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")
-        f.write(f"WIN_BOTTOM_TILE = ${W_B:02X}   ; bottom-border tile (restores under the prompt)\n")
+        f.write(f"WIN_BOTTOM_TILE = ${W_ids['B']:02X}   ; bottom-border tile (restores under the prompt)\n")
         f.write(f"DIGIT_TILE = ${font_id['0']:02X}   ; '0'; digit d -> DIGIT_TILE + d\n")
         f.write(f"CURSOR_TILE = ${font_id[CURSOR]:02X}   ; menu cursor (right triangle)\n\n")
+        f.write("; World geometry (16px metatiles): 2 screens wide, 1 tall.\n")
+        f.write(f"WORLD_W = {WM}\n")
+        f.write(f"WORLD_H = {HM}\n")
         f.write("; Text window: full-width box at nametable rows 20-27.\n")
         f.write(f"WIN_STEPS = {win_steps}\n")
         f.write(f"TEXT_COLS = {TEXT_W}\n")
@@ -718,15 +758,16 @@ def main():
         for i, (name, _) in enumerate(MESSAGES):
             f.write(f"MSG_{name} = {i}\n")
 
-    # console preview
+    # console preview (| marks the screen seam at metatile col 16)
     glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "T",
               T_WALL: "#", T_BUSH: "o", T_WATER: "~"}
-    print("Field map preview (N = NPC, facing %s):" % NPC_FACING)
-    for y in range(H):
+    print("World preview, 32x15 metatiles (N = NPC, facing %s):" % NPC_FACING)
+    for y in range(HM):
         line = ""
-        for x in range(W):
-            t = m[y][x]
-            line += "N" if NPC_DOWN <= t <= NPC_RIGHT + 3 else glyphs.get(t, "?")
+        for x in range(WM):
+            if x == 16:
+                line += "|"
+            line += "N" if (x, y) == (NPC_GX, NPC_GY) else glyphs.get(world[y][x], "?")
         print(line)
 
 

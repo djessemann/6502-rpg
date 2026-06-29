@@ -130,9 +130,9 @@ camX_hi:      .res 1   ; horizontal scroll bit 8 -> PPUCTRL base-nametable bit0
 cam_y_lo:     .res 1   ; vertical camera position 0..479 (16-bit)
 cam_y_hi:     .res 1
 scrollY:      .res 1   ; PPU vertical scroll for this frame (cam_y mod 240)
-cam_my:       .res 1   ; camera metatile row (cam_y / 16, 0..29)
-prev_cam_my:  .res 1   ; previous frame's cam_my (to detect row crossings)
-stream_row:   .res 1   ; world metatile-row a crossing needs streamed in
+cam_ty:       .res 1   ; camera top tile-row (cam_y / 8, 0..59)
+prev_cam_ty:  .res 1   ; previous frame's cam_ty (to detect 8px crossings)
+stream_row:   .res 1   ; world TILE-row a crossing needs streamed in (0..59)
 stream_req:   .res 1   ; number of queued stream strips for NMI (0 = none)
 sd_idx:       .res 1   ; scratch: descriptor index while building/flushing
 scnt:         .res 1   ; NMI scratch: current strip byte count
@@ -431,8 +431,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda #0
     sta stream_req      ; no pending row stream
     jsr UpdateCamera    ; seed the camera before the first frame
-    lda cam_my
-    sta prev_cam_my     ; no spurious crossing on the first frame
+    lda cam_ty
+    sta prev_cam_ty     ; no spurious crossing on the first frame
 
     lda #0              ; start equipped with weapon 0 (Club)
     sta equipped
@@ -798,7 +798,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 ;   camX = heroWorldX - 128 (mod 512) -> camX_lo + camX_hi (nametable select)
 ;   camY = heroWorldY - 112 (mod 480) -> cam_y_lo/hi; then:
 ;     scrollY = camY mod 240  (position within the row-streamed nametable)
-;     cam_my  = camY / 16      (camera's metatile row, for the streamer)
+;     cam_ty  = camY / 8       (camera's top tile-row, for the streamer)
 ; ----------------------------------------------------------------------------
 .proc UpdateCamera
     ldx #HERO
@@ -846,62 +846,60 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda cam_y_lo
     sta scrollY
 
-    ; cam_my = camY / 16 = (cam_y_hi << 4) | (cam_y_lo >> 4)
+    ; cam_ty = camY / 8 = (cam_y_hi << 5) | (cam_y_lo >> 3)
 @mrow:
     lda cam_y_lo
     lsr a
     lsr a
     lsr a
-    lsr a
-    sta cam_my
+    sta cam_ty
     lda cam_y_hi
     beq @done
-    lda cam_my
+    lda cam_ty
     clc
-    adc #16
-    sta cam_my
+    adc #32
+    sta cam_ty
 @done:
     rts
 .endproc
 
 ; ----------------------------------------------------------------------------
-; StreamRows — when the camera crosses into a new metatile row, queue the
-; incoming row's strips for the NMI to write (4 tile strips + 2 attribute
-; strips). The world is 30 metatile rows tall but the nametable holds only 15,
-; so world rows MY and MY+15 share a nametable slot; we overwrite the freed slot
-; with the row scrolling in. The transient seam stays in the top/bottom overscan.
+; StreamRows — when the camera crosses an 8px tile-row boundary, queue the
+; incoming tile-row's strips for the NMI (2 tile + 2 attribute). Streaming at
+; tile (not metatile) granularity keeps the unavoidable wrap-seam <= 7px, so it
+; stays inside the top/bottom overscan instead of flashing on screen. The
+; nametable holds exactly 30 tile-rows, so world tile-row T lives in slot T%30.
 ; ----------------------------------------------------------------------------
 .proc StreamRows
-    lda cam_my
-    cmp prev_cam_my
+    lda cam_ty
+    cmp prev_cam_ty
     beq @none           ; no crossing this frame
 
-    ; Determine the incoming world metatile-row.
-    ;   moving down: new bottom row = cam_my + 14
-    ;   moving up:   new top row    = cam_my
-    ; "down" iff cam_my == (prev_cam_my + 1) mod 30.
-    lda prev_cam_my
+    ; Incoming world tile-row:
+    ;   moving down: new bottom row = cam_ty + 29 (mod 60)
+    ;   moving up:   new top row    = cam_ty
+    ; "down" iff cam_ty == (prev_cam_ty + 1) mod 60.
+    lda prev_cam_ty
     clc
     adc #1
-    cmp #30
+    cmp #60
     bcc :+
     lda #0
-:   cmp cam_my
+:   cmp cam_ty
     bne @up
-    ; down
-    lda cam_my
+    lda cam_ty          ; down
     clc
-    adc #14
-    cmp #30
+    adc #29
+    cmp #60
     bcc @setrow
-    sbc #30             ; carry set here -> mod 30
+    sbc #60             ; carry set here -> mod 60
     jmp @setrow
 @up:
-    lda cam_my
+    lda cam_ty
 @setrow:
     sta stream_row
-    lda cam_my
-    sta prev_cam_my
+    lda cam_ty
+    sta prev_cam_ty
     jsr BuildStream
     rts
 @none:
@@ -1942,7 +1940,7 @@ slot_dy:
 ; ----------------------------------------------------------------------------
 ; DrawField — paint the top screen of the world (world tile-rows 0..29) into the
 ; two nametables and seed the attribute shadows. Assumes the camera starts at
-; world row 0 (InitGame places the hero so cam_my = 0). Rendering off only.
+; world row 0 (InitGame places the hero so cam_ty = 0). Rendering off only.
 ; ----------------------------------------------------------------------------
 .proc DrawField
     lda #<worldtiles
@@ -2121,31 +2119,31 @@ slot_dy:
     rts
 .endproc
 
-; BuildStream — fill the 6 stream descriptors for world metatile-row stream_row
-; (4 tile strips of 32 + 2 attribute strips of 8), then arm stream_req so the
-; next NMI writes them. nmr = stream_row mod 15 is the nametable slot.
+; BuildStream — fill 4 stream descriptors for world TILE-row stream_row (the
+; LEFT and RIGHT 32-tile strips + the two attribute byte-rows), then arm
+; stream_req. slot = stream_row mod 30 is the nametable tile-row.
 .proc BuildStream
-    ; rowbase16 = nmr * 64
+    ; rowbase16 = slot * 32, slot = stream_row mod 30
     lda stream_row
-    cmp #15
+    cmp #30
     bcc :+
-    sbc #15
+    sbc #30
 :   sta rb_lo
     lda #0
     sta rb_hi
-    ldx #6
+    ldx #5
 @sh:
     asl rb_lo
     rol rb_hi
     dex
     bne @sh
 
-    ; source offset = stream_row * 128 + worldtiles
+    ; source offset = stream_row * 64 + worldtiles
     lda #0
     sta ms_hi
     lda stream_row
     sta ms_lo
-    ldx #7
+    ldx #6
 @sh2:
     asl ms_lo
     rol ms_hi
@@ -2159,7 +2157,7 @@ slot_dy:
     adc #>worldtiles
     sta ms_hi
 
-    ; desc 0: LEFT tile-row 0  -> $2000 + rowbase
+    ; desc 0: LEFT strip  -> $2000 + rowbase, src ms
     lda #$20
     clc
     adc rb_hi
@@ -2172,7 +2170,7 @@ slot_dy:
     sta sd_src_hi+0
     lda #32
     sta sd_cnt+0
-    ; desc 1: RIGHT tile-row 0 -> $2400 + rowbase, src + 32
+    ; desc 1: RIGHT strip -> $2400 + rowbase, src ms + 32
     lda #$24
     clc
     adc rb_hi
@@ -2188,82 +2186,50 @@ slot_dy:
     sta sd_src_hi+1
     lda #32
     sta sd_cnt+1
-    ; desc 2: LEFT tile-row 1  -> $2000 + rowbase + 32, src + 64
-    lda rb_lo
-    clc
-    adc #32
-    sta sd_dst_lo+2
-    lda #$20
-    adc rb_hi
-    sta sd_dst_hi+2
-    lda ms_lo
-    clc
-    adc #64
-    sta sd_src_lo+2
-    lda ms_hi
-    adc #0
-    sta sd_src_hi+2
-    lda #32
-    sta sd_cnt+2
-    ; desc 3: RIGHT tile-row 1 -> $2400 + rowbase + 32, src + 96
-    lda rb_lo
-    clc
-    adc #32
-    sta sd_dst_lo+3
-    lda #$24
-    adc rb_hi
-    sta sd_dst_hi+3
-    lda ms_lo
-    clc
-    adc #96
-    sta sd_src_lo+3
-    lda ms_hi
-    adc #0
-    sta sd_src_hi+3
-    lda #32
-    sta sd_cnt+3
 
-    ; attributes: fold this row into the shadows; abase returned in sd_idx
+    ; attributes: fold this tile-row's metatile-row (stream_row / 2) into the
+    ; shadows; abase (nametable attr-row * 8) returned in sd_idx.
     lda stream_row
+    lsr a
     jsr MergeAttrRow
 
-    ; desc 4: LEFT attr  -> $23C0 + abase, src attr_shadow_l + abase
+    ; desc 2: LEFT attr  -> $23C0 + abase, src attr_shadow_l + abase
     lda sd_idx
     clc
     adc #$C0
-    sta sd_dst_lo+4
+    sta sd_dst_lo+2
     lda #$23
     adc #0
-    sta sd_dst_hi+4
+    sta sd_dst_hi+2
     lda #<attr_shadow_l
     clc
     adc sd_idx
-    sta sd_src_lo+4
+    sta sd_src_lo+2
     lda #>attr_shadow_l
     adc #0
-    sta sd_src_hi+4
+    sta sd_src_hi+2
     lda #8
-    sta sd_cnt+4
-    ; desc 5: RIGHT attr -> $27C0 + abase, src attr_shadow_r + abase
+    sta sd_cnt+2
+    ; desc 3: RIGHT attr -> $27C0 + abase, src attr_shadow_r + abase
     lda sd_idx
     clc
     adc #$C0
-    sta sd_dst_lo+5
+    sta sd_dst_lo+3
     lda #$27
     adc #0
-    sta sd_dst_hi+5
+    sta sd_dst_hi+3
     lda #<attr_shadow_r
     clc
     adc sd_idx
-    sta sd_src_lo+5
+    sta sd_src_lo+3
     lda #>attr_shadow_r
     adc #0
-    sta sd_src_hi+5
+    sta sd_src_hi+3
     lda #8
-    sta sd_cnt+5
+    sta sd_cnt+3
 
-    lda #STREAM_MAX
-    sta stream_req      ; arm: the next NMI writes all 6 strips
+    lda #4
+    sta stream_req      ; arm: the next NMI writes the 4 strips
     rts
 .endproc
 

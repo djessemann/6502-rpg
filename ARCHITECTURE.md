@@ -185,18 +185,20 @@ position (128,112); the world scrolls beneath it (Dragon-Quest style):
   `cam_my = camY/16` (the camera's metatile row, for the streamer).
 NMI writes the scroll after the VBUF flush and row-stream writes.
 
-**Row streaming** (`StreamRows` → `BuildStream`, flushed in NMI): the nametable
-holds only 15 metatile-rows, so world rows MY and MY+15 share a slot. On each
-16px vertical crossing, the incoming metatile-row is written into the freed slot
-as six strips — 4 tile strips (32 bytes each: left+right nametable × 2 tile-rows,
-sourced straight from `worldtiles`) and 2 attribute strips (8 bytes each). All
-six fit in one vblank (~144 bytes < budget), so the row is ready the frame it
-becomes visible; the transient seam stays in the top/bottom overscan.
+**Row streaming** (`StreamRows` → `BuildStream`, flushed in NMI) is done at **8px
+tile-row granularity**, not 16px. The nametable is exactly 30 tile-rows = the
+screen height, so world tile-row T lives in slot `T % 30` and the only wrap-seam
+is a ≤7px sliver that stays inside the top/bottom overscan. (Streaming whole
+16px metatile-rows instead pushed that seam to ~14px, which flashed on-screen
+while scrolling up — the tile-granularity update fixes it.) On each 8px crossing
+(`cam_ty = camY/8` changes) the incoming tile-row is written as four strips: the
+LEFT and RIGHT 32-tile strips (straight from `worldtiles`) and the two attribute
+byte-rows. All four fit easily in one vblank, ready the frame they appear.
 Attributes use RAM **shadows** (`attr_shadow_l/_r`): one metatile == one attr
 quadrant, so an attr byte mixes two metatile rows (even row → low nibble, odd →
 high), read-modify-written from `attr_pair_l/_r` (`MergeAttrRow`). `DrawField`
 (boot, rendering off) paints world rows 0–29 into both nametables and seeds the
-shadows; the hero starts so `cam_my = 0` to match.
+shadows; the hero starts so `cam_ty = 0` to match.
 
 ## Movement & collision
 

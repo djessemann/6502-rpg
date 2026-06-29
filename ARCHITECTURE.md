@@ -212,10 +212,22 @@ is 16-bit (`ent_px`/`ent_pxh`), wrapping mod 512; world Y is 16-bit
 (`ent_py`/`ent_pyh`), wrapping mod 480. After 16px it snaps the grid cell from the
 world position (`gx = (pxh<<4)|(px>>4)`, `gy = (pyh<<4)|(py>>4)`).
 
-> **Still gated:** the A-menu, encounters, and battle remain disabled on the
-> field (their handlers are intact). The text box / menu / battle draw into fixed
-> nametable addresses and must be made camera-aware before they can reopen under
-> the scrolling camera — that's the next milestone.
+### Boxes/battle over the scrolling camera
+
+The text box, command menu, NPC dialogue, and battle all draw into **fixed**
+nametable addresses ($22xx), which only works at scroll (0,0). Two mechanisms
+make that hold:
+
+- **Battle** is a full-screen view: `EnterBattle` sets `in_battle`, the NMI
+  forces scroll (0,0), and `ExitBattle` repaints the field at the hero's current
+  position (camera-aware `DrawField`) and restores the field scroll.
+- **Field boxes** (`EnterFieldBox`): the hero is grid-aligned when a box opens,
+  so the camera sits on a 16px boundary (the view is metatile-aligned). The
+  current on-screen 32×30 view is copied into nametable 0 (tiles from
+  `worldtiles`, attributes rebuilt from `worldpal` by `BuildViewAttr`), `box_view`
+  is set so the NMI holds scroll (0,0), and the existing box code runs unchanged.
+  `ExitFieldBox` repaints the scrolling layout and restores the camera. Each
+  transition costs one blank frame (rendering off during the copy).
 
 -----
 

@@ -13,7 +13,7 @@
 .include "nes.inc"
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
-.import worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap, msg_table
+.import worldtiles, attr_pair_l, attr_pair_r, worldsolid, worldpal, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
 .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
 .import frag_LBL_ATK, frag_LBL_POWER
@@ -160,6 +160,7 @@ term_action:  .res 1   ; how the last line ended: 0=newline 1=page 2=end
 aux_flag:     .res 1   ; one-shot latch (e.g. "prompt drawn")
 msg_context:  .res 1   ; CTX_FIELD / CTX_BATTLE
 in_battle:    .res 1   ; nonzero while on the battle screen (hides the hero)
+box_view:     .res 1   ; nonzero while a field box is open (view in NT0, scroll 0,0)
 
 ; battle / combat
 enemy_hp:     .res 1
@@ -375,7 +376,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     ; nametable is top-left and scrollY is the camera's vertical position.
     bit PPUSTATUS
     lda in_battle
-    bne @battlescroll
+    ora box_view
+    bne @fixedscroll
     lda camX_lo
     sta PPUSCROLL
     lda scrollY
@@ -384,7 +386,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     ora camX_hi
     sta PPUCTRL
     jmp @scrolldone
-@battlescroll:
+@fixedscroll:           ; battle screen / open field box: NT0 at scroll (0,0)
     lda #$00
     sta PPUSCROLL
     sta PPUSCROLL
@@ -975,8 +977,13 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda step_count
     cmp #ENC_STEPS
     bcs @encounter
-    ; (A-menu / NPC talk re-enabled in part 3b, once the field box is
-    ; camera-aware; OpenMenuBox still draws at a fixed nametable address.)
+
+    ; A opens the command menu (Talk / Equip).
+    lda pad1_new
+    and #BTN_A
+    beq @ret
+    lda #MENU_CMD
+    jsr OpenMenuBox
 @ret:
     rts
 
@@ -1222,16 +1229,9 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     rts
 
 @closing:
-    lda #1              ; draw mode = closing (restore field)
-    sta draw_mode
-    jsr DrawStep
-    inc job_step
-    lda job_step
-    cmp #WIN_STEPS
-    bcc @ret6
+    jsr ExitFieldBox    ; repaint the scrolling field and restore the camera
     lda #GS_FIELD
     sta gamestate
-@ret6:
     rts
 .endproc
 
@@ -1342,8 +1342,13 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 :   rts
 .endproc
 
-; OpenMenuBox — set up menu A and open the box (used from the field).
+; OpenMenuBox — set up menu A and open the box (used from the field). First
+; switches to the box view (current screen copied into NT0 at scroll 0,0) so the
+; fixed-address box code works regardless of the field scroll position.
 .proc OpenMenuBox
+    pha
+    jsr EnterFieldBox
+    pla
     sta menu_id
     lda #0
     sta menu_cursor
@@ -2292,6 +2297,271 @@ slot_dy:
 
     lda #4
     sta stream_req      ; arm: the next NMI writes the 4 strips
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; EnterFieldBox — switch from the scrolling field to the "box view": copy the
+; 32x30 tiles currently on screen into nametable 0 (with matching attributes)
+; and set box_view so the NMI holds the scroll at (0,0). The fixed-address box
+; code (DrawStep/RenderLine at $22xx) then works regardless of field scroll.
+; The hero is grid-aligned when this is called, so the view is metatile-aligned.
+; Rendering is off during the copy (one blank frame).
+; ----------------------------------------------------------------------------
+.proc EnterFieldBox
+    jsr WaitFrame
+    lda #$00
+    sta PPUCTRL
+    sta PPUMASK
+
+    ; camX_tile = camX / 8 (0..63) -> mt_col
+    lda camX_lo
+    lsr a
+    lsr a
+    lsr a
+    sta mt_col
+    lda camX_hi
+    beq :+
+    lda mt_col
+    clc
+    adc #32
+    sta mt_col
+:   ; part1 count (tiles before the source column wraps at 64) -> mt_row
+    lda mt_col
+    cmp #33
+    bcc @full
+    lda #64
+    sec
+    sbc mt_col
+    sta mt_row
+    jmp @rep
+@full:
+    lda #32
+    sta mt_row
+
+@rep:
+    bit PPUSTATUS       ; NT0 tiles -> $2000, written row by row (auto-increment)
+    lda #$20
+    sta PPUADDR
+    lda #$00
+    sta PPUADDR
+    lda #0
+    sta tpx             ; screen row r = 0..29
+@row:
+    lda cam_ty          ; WR = (cam_ty + r) mod 60
+    clc
+    adc tpx
+    cmp #60
+    bcc :+
+    sbc #60
+:   sta ms_lo
+    lda #0
+    sta ms_hi
+    ldx #6              ; ptr = worldtiles + WR*64
+@sh:
+    asl ms_lo
+    rol ms_hi
+    dex
+    bne @sh
+    lda ms_lo
+    clc
+    adc #<worldtiles
+    sta ptr
+    lda ms_hi
+    adc #>worldtiles
+    sta ptr+1
+    ; part 1: source cols camX_tile.. (mt_row tiles)
+    ldy mt_col
+    ldx mt_row
+@p1:
+    lda (ptr),y
+    sta PPUDATA
+    iny
+    dex
+    bne @p1
+    ; part 2: wrapped source cols 0.. (32 - mt_row tiles)
+    lda #32
+    sec
+    sbc mt_row
+    beq @nrow
+    tax
+    ldy #0
+@p2:
+    lda (ptr),y
+    sta PPUDATA
+    iny
+    dex
+    bne @p2
+@nrow:
+    inc tpx
+    lda tpx
+    cmp #30
+    beq @attr
+    jmp @row
+
+@attr:
+    jsr BuildViewAttr   ; NT0 attributes for the current view
+    lda #1
+    sta box_view
+
+    bit PPUSTATUS       ; box view is shown at scroll (0,0)
+    lda #$00
+    sta PPUSCROLL
+    sta PPUSCROLL
+    lda #%10001000
+    sta PPUCTRL
+    lda #%00011110
+    sta PPUMASK
+    rts
+.endproc
+
+; BuildViewAttr — compute nametable 0's attribute table for the current view
+; from worldpal (per-metatile palette) and write it to $23C0. The view origin
+; in metatiles is (camX_tile/2, cam_ty/2); both are even when grid-aligned, so
+; each attribute quadrant is exactly one world metatile. Uses attr_shadow_l as
+; a scratch buffer (DrawField rebuilds it on close). Rendering off only.
+.proc BuildViewAttr
+    ldx #63
+    lda #0
+@clr:
+    sta attr_shadow_l,x
+    dex
+    bpl @clr
+
+    lda cam_ty          ; vmr0 = cam_ty / 2
+    lsr a
+    sta bs_par
+    lda mt_col          ; vmc0 = camX_tile / 2
+    lsr a
+    sta bs_cnt
+
+    lda #0
+    sta tpx             ; vmr = 0..14
+@vmr:
+    lda bs_par          ; world metatile row = (vmr0 + vmr) mod 30
+    clc
+    adc tpx
+    cmp #30
+    bcc :+
+    sbc #30
+:   sta rb_lo           ; *32 -> ptr = worldpal + row*32
+    lda #0
+    sta rb_hi
+    ldx #5
+@s:
+    asl rb_lo
+    rol rb_hi
+    dex
+    bne @s
+    lda rb_lo
+    clc
+    adc #<worldpal
+    sta ptr
+    lda rb_hi
+    adc #>worldpal
+    sta ptr+1
+
+    lda #0
+    sta tpy             ; vmc = 0..15
+@vmc:
+    lda bs_cnt          ; mc = (vmc0 + vmc) mod 32
+    clc
+    adc tpy
+    and #31
+    tay
+    lda (ptr),y         ; pal 0..2
+    sta woff
+    ; shift = (vmc&1)*2 + (vmr&1)*4
+    lda tpy
+    and #1
+    asl a
+    sta woff2
+    lda tpx
+    and #1
+    asl a
+    asl a
+    clc
+    adc woff2
+    tax                 ; X = shift count
+    lda woff
+    beq @noshift        ; pal 0 contributes nothing
+@shl:
+    cpx #0
+    beq @doneshift
+    asl a
+    dex
+    jmp @shl
+@doneshift:
+    sta woff            ; pal << shift
+@noshift:
+    ; cell index = (vmr>>1)*8 + (vmc>>1)
+    lda tpx
+    lsr a
+    asl a
+    asl a
+    asl a
+    sta woff2
+    lda tpy
+    lsr a
+    clc
+    adc woff2
+    tax
+    lda attr_shadow_l,x
+    ora woff
+    sta attr_shadow_l,x
+    inc tpy
+    lda tpy
+    cmp #16
+    beq @nvmr
+    jmp @vmc
+@nvmr:
+    inc tpx
+    lda tpx
+    cmp #15
+    beq @write
+    jmp @vmr
+
+@write:
+    bit PPUSTATUS
+    lda #$23
+    sta PPUADDR
+    lda #$C0
+    sta PPUADDR
+    ldx #0
+@w:
+    lda attr_shadow_l,x
+    sta PPUDATA
+    inx
+    cpx #64
+    bne @w
+    rts
+.endproc
+
+; ExitFieldBox — leave the box view: repaint the scrolling field (camera-aware)
+; and restore the field scroll. Rendering off during the repaint (one blank
+; frame). Mirror of EnterFieldBox.
+.proc ExitFieldBox
+    jsr WaitFrame
+    lda #$00
+    sta PPUCTRL
+    sta PPUMASK
+
+    jsr DrawField       ; repaint both nametables for the current camera
+    lda cam_ty
+    sta prev_cam_ty
+    lda #$00
+    sta box_view
+
+    bit PPUSTATUS
+    lda camX_lo
+    sta PPUSCROLL
+    lda scrollY
+    sta PPUSCROLL
+    lda #%10001000
+    ora camX_hi
+    sta PPUCTRL
+    lda #%00011110
+    sta PPUMASK
     rts
 .endproc
 

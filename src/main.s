@@ -260,8 +260,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda #>pal_field
     sta ptr+1
     jsr LoadPalette
-    jsr DrawField
-    jsr InitGame
+    jsr InitGame        ; place the hero + seed the camera (cam_ty) first
+    jsr DrawField       ; ...so DrawField paints the world at the start camera
 
     ; Enable NMI; background pattern table 0, sprite pattern table 1.
     lda #%10001000
@@ -370,10 +370,12 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     sta stream_req
 @nostream:
 
-    ; Set scroll after the $2006 writes this frame. camX high bit selects which
-    ; nametable is top-left (horizontal spans the two side-by-side screens);
-    ; scrollY is the camera's position within the row-streamed nametable.
+    ; Set scroll after the $2006 writes this frame. On the battle screen the
+    ; scroll is fixed at (0,0); on the field, camX high bit selects which
+    ; nametable is top-left and scrollY is the camera's vertical position.
     bit PPUSTATUS
+    lda in_battle
+    bne @battlescroll
     lda camX_lo
     sta PPUSCROLL
     lda scrollY
@@ -381,6 +383,14 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda #%10001000
     ora camX_hi
     sta PPUCTRL
+    jmp @scrolldone
+@battlescroll:
+    lda #$00
+    sta PPUSCROLL
+    sta PPUSCROLL
+    lda #%10001000
+    sta PPUCTRL
+@scrolldone:
 
     jsr SoundTick       ; called every frame, including lag frames (stub)
 
@@ -950,10 +960,23 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 :
 
     ; --- GS_FIELD ---
-    ; Milestone 1 (scrolling overworld): walking only. The A-menu and encounter
-    ; triggers are gated until the text box is made camera-aware; their handlers
-    ; (@encounter, @bwait, @menu, ...) remain below for that re-integration.
     jsr UpdateHero
+
+    ; Interactions/encounters only resolve when the hero is grid-aligned.
+    ldx #HERO
+    lda ent_state,x
+    cmp #ST_IDLE
+    bne @ret
+
+    ; Encounter trigger: debug button (Select) or the step counter.
+    lda pad1_new
+    and #BTN_SELECT
+    bne @encounter
+    lda step_count
+    cmp #ENC_STEPS
+    bcs @encounter
+    ; (A-menu / NPC talk re-enabled in part 3b, once the field box is
+    ; camera-aware; OpenMenuBox still draws at a fixed nametable address.)
 @ret:
     rts
 
@@ -1779,6 +1802,9 @@ slot_dy:
     lda #>OAM_BUF
     sta OAMDMA
 
+    lda #1
+    sta in_battle       ; set before NMI resumes so it uses battle scroll (0,0)
+
     bit PPUSTATUS       ; reset scroll before rendering resumes
     lda #$00
     sta PPUSCROLL
@@ -1790,8 +1816,6 @@ slot_dy:
     sta PPUMASK         ; rendering on
 
     ; Begin combat: set up state, then open the message box and show the intro.
-    lda #1
-    sta in_battle
     lda #ENEMY_MAX_HP
     sta enemy_hp
     lda #BP_INTRO
@@ -1874,7 +1898,10 @@ slot_dy:
     sta PPUCTRL         ; NMI off
     sta PPUMASK         ; rendering off
 
-    jsr DrawField
+    jsr UpdateCamera    ; recompute field scroll from the hero's world position
+    jsr DrawField       ; repaint the field at that camera (camera-aware)
+    lda cam_ty
+    sta prev_cam_ty     ; no spurious stream on the first field frame back
     lda #<pal_field
     sta ptr
     lda #>pal_field
@@ -1888,18 +1915,21 @@ slot_dy:
     lda #>OAM_BUF
     sta OAMDMA
 
-    bit PPUSTATUS
     lda #$00
+    sta in_battle       ; clear before NMI resumes so it uses field scroll
+
+    bit PPUSTATUS       ; restore the field scroll position
+    lda camX_lo
     sta PPUSCROLL
+    lda scrollY
     sta PPUSCROLL
 
     lda #%10001000
+    ora camX_hi
     sta PPUCTRL
     lda #%00011110
     sta PPUMASK
 
-    lda #$00
-    sta in_battle
     lda #GS_FIELD
     sta gamestate
     rts
@@ -1938,26 +1968,62 @@ slot_dy:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; DrawField — paint the top screen of the world (world tile-rows 0..29) into the
-; two nametables and seed the attribute shadows. Assumes the camera starts at
-; world row 0 (InitGame places the hero so cam_ty = 0). Rendering off only.
+; DrawField — repaint the whole field for the CURRENT camera (cam_ty): for each
+; of the 30 visible world tile-rows T = cam_ty+i (mod 60), write its LEFT/RIGHT
+; strips into nametable slot T mod 30, then rebuild the attribute shadows. Used
+; at boot and when returning from battle. Rendering off only.
 ; ----------------------------------------------------------------------------
 .proc DrawField
-    lda #<worldtiles
-    sta ptr
-    lda #>worldtiles
-    sta ptr+1
-    lda #$00
-    sta vpkt_lo         ; dst low byte (reused as temp)
-    lda #$20
-    sta vpkt_cnt        ; dst high byte (reused as temp)
-    ldx #30             ; tile-rows remaining
+    lda #0
+    sta tpx             ; i = 0..29
 @row:
-    ; LEFT 32 -> $2000 + row*32
-    bit PPUSTATUS
-    lda vpkt_cnt
+    lda cam_ty          ; T = (cam_ty + i) mod 60
+    clc
+    adc tpx
+    cmp #60
+    bcc :+
+    sbc #60
+:   sta tpy             ; tpy = T
+    cmp #30             ; slot = T mod 30
+    bcc :+
+    sbc #30
+:   sta mt_col          ; mt_col = slot
+
+    lda #0              ; src = worldtiles + T*64
+    sta ms_hi
+    lda tpy
+    sta ms_lo
+    ldx #6
+@s1:
+    asl ms_lo
+    rol ms_hi
+    dex
+    bne @s1
+    lda ms_lo
+    clc
+    adc #<worldtiles
+    sta ptr
+    lda ms_hi
+    adc #>worldtiles
+    sta ptr+1
+
+    lda #0              ; rowbase = slot*32
+    sta rb_hi
+    lda mt_col
+    sta rb_lo
+    ldx #5
+@s2:
+    asl rb_lo
+    rol rb_hi
+    dex
+    bne @s2
+
+    bit PPUSTATUS       ; LEFT 32 -> $2000 + rowbase
+    lda #$20
+    clc
+    adc rb_hi
     sta PPUADDR
-    lda vpkt_lo
+    lda rb_lo
     sta PPUADDR
     ldy #0
 @l: lda (ptr),y
@@ -1965,13 +2031,13 @@ slot_dy:
     iny
     cpy #32
     bne @l
-    ; RIGHT 32 -> $2400 + row*32 (dst high + $04, src + 32)
-    bit PPUSTATUS
-    lda vpkt_cnt
+
+    bit PPUSTATUS       ; RIGHT 32 -> $2400 + rowbase (src + 32)
+    lda #$24
     clc
-    adc #$04
+    adc rb_hi
     sta PPUADDR
-    lda vpkt_lo
+    lda rb_lo
     sta PPUADDR
     ldy #32
 @r: lda (ptr),y
@@ -1979,28 +2045,18 @@ slot_dy:
     iny
     cpy #64
     bne @r
-    ; advance source by 64, dest by 32
-    lda ptr
-    clc
-    adc #64
-    sta ptr
-    bcc :+
-    inc ptr+1
-:   lda vpkt_lo
-    clc
-    adc #32
-    sta vpkt_lo
-    bcc :+
-    inc vpkt_cnt
-:   dex
-    bne @row
 
-    jsr InitAttrShadow
+    inc tpx
+    lda tpx
+    cmp #30
+    beq :+
+    jmp @row
+:   jsr InitAttrShadow
     rts
 .endproc
 
-; InitAttrShadow — build the attribute shadows for world metatile-rows 0..14 and
-; copy them to both nametables' attribute tables. Rendering off only.
+; InitAttrShadow — rebuild the attribute shadows for the 30 visible tile-rows
+; (cam_ty..cam_ty+29) and copy them to both nametables. Rendering off only.
 .proc InitAttrShadow
     ldx #63             ; clear both shadows
     lda #0
@@ -2011,13 +2067,19 @@ slot_dy:
     bpl @clr
 
     lda #0
-    sta tpx             ; MY loop counter (MergeAttrRow clobbers X/Y)
+    sta tpx             ; tile-row index i = 0..29 (MergeAttrRow clobbers X/Y)
 @m:
-    lda tpx
+    lda cam_ty          ; T = (cam_ty + i) mod 60
+    clc
+    adc tpx
+    cmp #60
+    bcc :+
+    sbc #60
+:   lsr a               ; MY = T / 2
     jsr MergeAttrRow
     inc tpx
     lda tpx
-    cmp #15
+    cmp #30
     bne @m
 
     bit PPUSTATUS       ; left attributes -> $23C0

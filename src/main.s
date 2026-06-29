@@ -15,6 +15,8 @@
 
 .import fieldmap, fieldattr, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
+.import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
+.import frag_LBL_ATK, frag_LBL_POWER
 
 ; ----------------------------------------------------------------------------
 ; Constants
@@ -40,10 +42,17 @@ GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
 GS_TEXT    = 7          ; rendering message lines into the open box
 GS_TEXTWAIT = 8         ; page full ("more" prompt shown), waiting for A
 GS_BWAIT   = 9          ; battle message shown, waiting for A to advance combat
+GS_MENU    = 10         ; command/equip menu shown, handling cursor input
 
 ; message context: where GS_TEXT goes when a message ends
 CTX_FIELD  = 0          ; -> GS_DIALOG (wait A, then close)
 CTX_BATTLE = 1          ; -> GS_BWAIT (drive the battle)
+CTX_MENU   = 2          ; -> GS_MENU (handle cursor input)
+
+; menus
+MENU_CMD   = 0          ; Talk / Equip
+MENU_EQUIP = 1          ; weapon list
+NUM_WEAPONS = 2
 
 ; battle phases (what the pending A press does)
 BP_INTRO   = 0          ; intro shown; A -> first attack
@@ -139,6 +148,14 @@ in_battle:    .res 1   ; nonzero while on the battle screen (hides the hero)
 enemy_hp:     .res 1
 last_damage:  .res 1
 battle_phase: .res 1
+num:          .res 1   ; value AppendNumber renders
+
+; menus / equipment
+menu_id:      .res 1   ; MENU_CMD / MENU_EQUIP
+menu_cursor:  .res 1   ; highlighted item (0..menu_max)
+menu_max:     .res 1   ; last valid cursor index
+equipped:     .res 1   ; equipped weapon index
+player_atk:   .res 1   ; attack power of the equipped weapon
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -333,6 +350,11 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     sta ent_dir,x
     lda #ST_IDLE
     sta ent_state,x
+
+    lda #0              ; start equipped with weapon 0 (Club)
+    sta equipped
+    lda weapon_atk
+    sta player_atk
 
     lda #GS_FIELD
     sta gamestate
@@ -698,6 +720,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 :   cmp #GS_TEXTWAIT
     bne :+
     jmp @textwait
+:   cmp #GS_MENU
+    bne :+
+    jmp @menu
 :
 
     ; --- GS_FIELD ---
@@ -717,20 +742,12 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     cmp #ENC_STEPS
     bcs @encounter
 
-    ; Otherwise: talk to the NPC with A.
+    ; Otherwise: A opens the command menu (Talk / Equip).
     lda pad1_new
     and #BTN_A
     beq @ret
-    jsr FacingNPC       ; carry set if adjacent to and facing the NPC
-    bcc @ret
-    lda #CTX_FIELD
-    sta msg_context
-    lda #MSG_NPC_GREETING
-    jsr SetMessage
-    lda #0
-    sta job_step
-    lda #GS_OPENING
-    sta gamestate
+    lda #MENU_CMD
+    jsr OpenMenuBox
 @ret:
     rts
 
@@ -836,8 +853,14 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 @text_end:
     lda msg_context
     cmp #CTX_BATTLE
-    bne @text_field
+    bne @te_notbattle
     lda #GS_BWAIT       ; battle: wait for A to drive combat
+    sta gamestate
+    rts
+@te_notbattle:
+    cmp #CTX_MENU
+    bne @text_field
+    lda #GS_MENU        ; menu: handle cursor input
     sta gamestate
     rts
 @text_field:
@@ -876,6 +899,99 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 @ret4:
     rts
 
+@menu:
+    lda pad1_new
+    and #BTN_UP
+    beq @m_notup
+    lda menu_cursor
+    bne @m_up_ok
+    rts                 ; already at top
+@m_up_ok:
+    dec menu_cursor
+    jsr RenderMenu
+    rts
+@m_notup:
+    lda pad1_new
+    and #BTN_DOWN
+    beq @m_notdown
+    lda menu_cursor
+    cmp menu_max
+    bcc @m_down_ok
+    rts                 ; already at bottom
+@m_down_ok:
+    inc menu_cursor
+    jsr RenderMenu
+    rts
+@m_notdown:
+    lda pad1_new
+    and #BTN_B
+    bne @m_cancel
+    lda pad1_new
+    and #BTN_A
+    beq @m_done
+    ; --- A: confirm the highlighted item ---
+    lda menu_id
+    cmp #MENU_EQUIP
+    beq @m_equip
+    ; command menu
+    lda menu_cursor
+    bne @m_open_equip   ; cursor 1 = Equip
+    ; cursor 0 = Talk
+    ldx #HERO
+    jsr FacingNPC
+    bcc @m_nobody
+    lda #MSG_NPC_GREETING
+    jmp @m_field_msg
+@m_nobody:
+    lda #MSG_NOBODY
+@m_field_msg:
+    pha
+    lda #CTX_FIELD
+    sta msg_context
+    pla
+    jsr SetMessage
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+    rts
+@m_open_equip:
+    lda #MENU_EQUIP
+    sta menu_id
+    lda equipped
+    sta menu_cursor
+    lda #1
+    sta menu_max
+    jsr RenderMenu
+    rts
+@m_equip:
+    lda menu_cursor     ; equip the highlighted weapon
+    sta equipped
+    tax
+    lda weapon_atk,x
+    sta player_atk
+    jsr RenderMenu      ; re-render so "Power" updates
+    rts
+@m_cancel:
+    lda menu_id
+    cmp #MENU_EQUIP
+    bne @m_close
+    lda #MENU_CMD       ; equip -> back to command menu
+    sta menu_id
+    lda #1
+    sta menu_cursor
+    lda #1
+    sta menu_max
+    jsr RenderMenu
+    rts
+@m_close:
+    lda #0              ; command menu -> close the box
+    sta job_step
+    lda #GS_CLOSING
+    sta gamestate
+@m_done:
+    rts
+
 @closing:
     lda #1              ; draw mode = closing (restore field)
     sta draw_mode
@@ -901,13 +1017,10 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; DoAttack — deal damage to the enemy and compose the "takes N damage" line.
-; Damage is a small varying value (4-7) capped to the remaining HP.
+; DoAttack — deal the equipped weapon's attack power to the enemy (capped to
+; remaining HP) and compose the "takes N damage" line.
 .proc DoAttack
-    lda frame_count
-    and #$03
-    clc
-    adc #4              ; 4..7
+    lda player_atk
     cmp enemy_hp
     bcc :+
     lda enemy_hp        ; never report more than what's left
@@ -931,6 +1044,8 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda #>frag_DMG_PRE
     sta ptr+1
     jsr CopyFrag
+    lda last_damage
+    sta num
     jsr AppendNumber
     lda #<frag_DMG_POST
     sta ptr
@@ -964,9 +1079,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     rts
 .endproc
 
-; AppendNumber — append last_damage as 1-2 decimal digit tiles to (dst).
+; AppendNumber — append `num` as 1-2 decimal digit tiles to (dst).
 .proc AppendNumber
-    lda last_damage
+    lda num
     ldx #$FF
 @div:
     inx
@@ -997,6 +1112,153 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     inc dst+1
 :   rts
 .endproc
+
+; OpenMenuBox — set up menu A and open the box (used from the field).
+.proc OpenMenuBox
+    sta menu_id
+    lda #0
+    sta menu_cursor
+    lda #1
+    sta menu_max
+    lda #CTX_MENU
+    sta msg_context
+    jsr ComposeMenu
+    lda #<msg_buf
+    sta msg_ptr
+    lda #>msg_buf
+    sta msg_ptr+1
+    lda #0
+    sta job_step
+    lda #GS_OPENING
+    sta gamestate
+    rts
+.endproc
+
+; RenderMenu — recompose the current menu and redraw it (box already open).
+.proc RenderMenu
+    jsr ComposeMenu
+    lda #<msg_buf
+    sta msg_ptr
+    lda #>msg_buf
+    sta msg_ptr+1
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+    rts
+.endproc
+
+; ComposeMenu — build the current menu (menu_id) into msg_buf: option lines with
+; a cursor on menu_cursor, padded to 4 lines.
+.proc ComposeMenu
+    lda #<msg_buf
+    sta dst
+    lda #>msg_buf
+    sta dst+1
+    lda menu_id
+    cmp #MENU_EQUIP
+    beq @equip
+
+    ; command menu: Talk / Equip
+    ldx #0
+    jsr EmitCursor
+    lda #<frag_OPT_TALK
+    sta ptr
+    lda #>frag_OPT_TALK
+    sta ptr+1
+    jsr CopyFrag
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    ldx #1
+    jsr EmitCursor
+    lda #<frag_OPT_EQUIP
+    sta ptr
+    lda #>frag_OPT_EQUIP
+    sta ptr+1
+    jsr CopyFrag
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    lda #MSG_NEWLINE     ; line 2 blank
+    jsr StoreDst
+    lda #MSG_END         ; line 3 blank + end
+    jsr StoreDst
+    rts
+
+@equip:
+    ; weapon 0
+    ldx #0
+    jsr EmitCursor
+    lda #<frag_WPN0
+    sta ptr
+    lda #>frag_WPN0
+    sta ptr+1
+    jsr CopyFrag
+    jsr EmitAtk         ; " ATK " + weapon_atk[0]
+    ldx #0
+    lda weapon_atk,x
+    sta num
+    jsr AppendNumber
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    ; weapon 1
+    ldx #1
+    jsr EmitCursor
+    lda #<frag_WPN1
+    sta ptr
+    lda #>frag_WPN1
+    sta ptr+1
+    jsr CopyFrag
+    jsr EmitAtk
+    ldx #1
+    lda weapon_atk,x
+    sta num
+    jsr AppendNumber
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    lda #MSG_NEWLINE     ; line 2 blank
+    jsr StoreDst
+    ; line 3: "Power: N"
+    lda #<frag_LBL_POWER
+    sta ptr
+    lda #>frag_LBL_POWER
+    sta ptr+1
+    jsr CopyFrag
+    lda player_atk
+    sta num
+    jsr AppendNumber
+    lda #MSG_END
+    jsr StoreDst
+    rts
+.endproc
+
+; EmitCursor — emit the cursor tile (if menu_cursor == X) or a blank, then a
+; space, to (dst). Preserves nothing.
+.proc EmitCursor
+    cpx menu_cursor
+    bne @blank
+    lda #CURSOR_TILE
+    jmp @put
+@blank:
+    lda #$00
+@put:
+    jsr StoreDst
+    lda #$00            ; space after the cursor column
+    jsr StoreDst
+    rts
+.endproc
+
+; EmitAtk — append the " ATK " label fragment to (dst).
+.proc EmitAtk
+    lda #<frag_LBL_ATK
+    sta ptr
+    lda #>frag_LBL_ATK
+    sta ptr+1
+    jmp CopyFrag        ; tail call (rts from CopyFrag)
+.endproc
+
+.segment "RODATA"
+weapon_atk:
+    .byte 4, 8          ; Club, Sword
 
 ; RenderLine — render one interior line (cur_line) of the current message into
 ; the VRAM buffer, padding to TEXT_COLS. Sets term_action from the control code

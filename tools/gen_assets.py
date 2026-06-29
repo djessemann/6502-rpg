@@ -204,12 +204,15 @@ NPC_FACING = "down"
 # color1 = white ($30). So glyphs/frame are '#' = white ink (value 1) on
 # '.' = black (value 0). 5x7 cell, baseline on row 6, descenders on row 7.
 # ---------------------------------------------------------------------------
-ARROW = "\x1f"   # the "more text" prompt glyph (down triangle)
+ARROW = "\x1f"    # the "more text" prompt glyph (down triangle)
+CURSOR = "\x10"   # menu cursor glyph (right triangle)
 
 FONT = {
     " ": ["........"] * 8,
     ARROW: ["........", "........", "#######.", ".#####..",
             "..###...", "...#....", "........", "........"],
+    CURSOR: ["........", ".#......", ".##.....", ".###....",
+             ".####...", ".###....", ".##.....", ".#......"],
     # lowercase
     "a": ["........", "........", ".###....", "....#...", ".####...", "#...#...", ".####...", "........"],
     "b": ["#.......", "#.......", "#.##....", "##..#...", "#...#...", "#...#...", "##.#....", "........"],
@@ -276,6 +279,7 @@ FONT = {
     "8": ["........", ".###....", "#...#...", ".###....", "#...#...", "#...#...", ".###....", "........"],
     "9": ["........", ".###....", "#...#...", "#...#...", ".####...", "....#...", ".##.....", "........"],
     # punctuation
+    ":": ["........", "........", ".##.....", ".##.....", "........", ".##.....", ".##.....", "........"],
     ".": ["........", "........", "........", "........", "........", ".##.....", ".##.....", "........"],
     ",": ["........", "........", "........", "........", "........", ".##.....", ".##.....", ".#......"],
     "'": [".#......", ".#......", ".#......", "........", "........", "........", "........", "........"],
@@ -302,6 +306,7 @@ MESSAGES = [
      "one, and face the darkness that wakes once more."),
     ("SLIME_APPEARS", "A Slime draws near!"),
     ("SLIME_DEFEATED", "The Slime is defeated!"),
+    ("NOBODY", "There is no one there."),
 ]
 
 # Fragments composed with a runtime number into a one-line battle message:
@@ -310,6 +315,13 @@ MESSAGES = [
 FRAGMENTS = [
     ("DMG_PRE", "The Slime takes "),
     ("DMG_POST", " damage!"),
+    # menu labels
+    ("OPT_TALK", "Talk"),
+    ("OPT_EQUIP", "Equip"),
+    ("WPN0", "Club"),
+    ("WPN1", "Sword"),
+    ("LBL_ATK", "  ATK "),
+    ("LBL_POWER", "Power: "),
 ]
 
 # ---------------------------------------------------------------------------
@@ -692,7 +704,8 @@ def main():
         f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
         f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")
         f.write(f"WIN_BOTTOM_TILE = ${W_B:02X}   ; bottom-border tile (restores under the prompt)\n")
-        f.write(f"DIGIT_TILE = ${font_id['0']:02X}   ; '0'; digit d -> DIGIT_TILE + d\n\n")
+        f.write(f"DIGIT_TILE = ${font_id['0']:02X}   ; '0'; digit d -> DIGIT_TILE + d\n")
+        f.write(f"CURSOR_TILE = ${font_id[CURSOR]:02X}   ; menu cursor (right triangle)\n\n")
         f.write("; Text window: full-width box at nametable rows 20-27.\n")
         f.write(f"WIN_STEPS = {win_steps}\n")
         f.write(f"TEXT_COLS = {TEXT_W}\n")

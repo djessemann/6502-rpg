@@ -115,11 +115,24 @@ GS_BATTLEWAIT(6) battle_timer countdown → ExitBattle                    → FI
 GS_TEXT(7)       render message lines (RenderLine); ends per msg_context
 GS_TEXTWAIT(8)   page full ("▼" prompt), A → next page
 GS_BWAIT(9)      battle message shown; A advances combat (battle_phase)
+GS_MENU(10)      command/equip menu shown; cursor input (up/down/A/B)
 ```
 
-`msg_context` (FIELD/BATTLE) decides where `GS_TEXT` goes when a message ends:
-FIELD→`GS_DIALOG`, BATTLE→`GS_BWAIT`. The hero is hidden whenever `in_battle` is
-set (the whole battle screen), drawn otherwise (field, including dialogue).
+`msg_context` (FIELD/BATTLE/MENU) decides where `GS_TEXT` goes when a message
+ends: FIELD→`GS_DIALOG`, BATTLE→`GS_BWAIT`, MENU→`GS_MENU`. The hero is hidden
+whenever `in_battle` is set (the whole battle screen), drawn otherwise.
+
+### Menus & equipment
+
+Field A opens the command menu (`OpenMenuBox`). A menu is just a composed
+message (`ComposeMenu` builds option lines with a `CURSOR_TILE` on `menu_cursor`
+into `msg_buf`) rendered through `GS_TEXT`; `GS_MENU` handles up/down (move
+cursor → `RenderMenu`), A (confirm), B (cancel/back). Menus: `MENU_CMD`
+(Talk→dialogue if `FacingNPC` else `MSG_NOBODY`; Equip→`MENU_EQUIP`) and
+`MENU_EQUIP` (pick a weapon → sets `equipped`/`player_atk` from `weapon_atk[]`,
+shows a live "Power"). `DoAttack` deals `player_atk`, so the equipped weapon's
+stat drives battle damage. This menu/cursor code is the reusable UI primitive
+for battle commands, items, etc.
 
 ### Battle flow
 

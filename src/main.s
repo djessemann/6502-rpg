@@ -206,13 +206,17 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     jsr ReadInput
     jsr VBufClear       ; default: no nametable update this frame
     jsr UpdateGame      ; hero logic and/or a window draw step
+    ; Hide the hero only during the battle states (GS_BATTLE..GS_BATTLEWAIT).
+    ; Field, dialog AND text states keep the hero on screen.
     lda gamestate
     cmp #GS_BATTLE
-    bcs @hide           ; any battle state (>= GS_BATTLE): no field sprites
-    jsr BuildOAM        ; field/dialog: draw the hero metasprite
+    bcc @drawhero       ; < GS_BATTLE: field / opening / dialog / closing
+    cmp #GS_TEXT
+    bcs @drawhero       ; >= GS_TEXT: text states (still on the field)
+    jsr HideHero        ; GS_BATTLE / GS_ENEMYDIE / GS_BATTLEWAIT
     jmp @sync
-@hide:
-    jsr HideHero
+@drawhero:
+    jsr BuildOAM        ; draw the hero metasprite
 @sync:
     jsr WaitFrame       ; NMI flushes the VRAM buffer + OAM while we wait
     jmp @loop

@@ -601,20 +601,27 @@ def main():
             row = ", ".join(f"${b:02X}" for b in hero_bytes[i:i + 16])
             f.write(f"    .byte {row}   ; hero tile ${i // 16:02X}\n")
 
-    # --- build the metatile world: 32 x 15 metatiles = 2 screens wide,
-    # 1 screen tall (512 x 240 px). The world wraps on both axes (a torus).
-    WM, HM = 32, 15
+    # --- build the metatile world: 32 x 30 metatiles = 2 x 2 screens
+    # (512 x 480 px). The world wraps on both axes (a torus). Horizontal fits
+    # in the two side-by-side nametables; vertical is row-streamed at runtime.
+    WM, HM = 32, 30
     world = [[T_GRASS] * WM for _ in range(HM)]
-    # pond
+    # ponds
     for y in range(2, 5):
         for x in range(3, 7):
             world[y][x] = T_WATER
-    # roads: a vertical road on the screen seam, a horizontal road across
+    for y in range(20, 24):
+        for x in range(24, 29):
+            world[y][x] = T_WATER
+    # roads: vertical seams + two horizontal roads (one per screen-row band)
     for y in range(HM):
         world[y][15] = T_PATH
     for x in range(WM):
         world[7][x] = T_PATH
-    # a walled hut on the right screen (doorway in the bottom wall)
+        world[22][x] = T_PATH
+    for y in range(HM):
+        world[y][3] = T_PATH
+    # a walled hut (top-right screen) with a doorway
     for x in range(20, 25):
         world[3][x] = T_WALL
         world[6][x] = T_WALL
@@ -622,12 +629,16 @@ def main():
         world[y][20] = T_WALL
         world[y][24] = T_WALL
     world[6][22] = T_PATH
-    # a small tree cluster + scattered flora
-    for (x, y) in [(8, 1), (9, 1), (8, 2), (27, 13), (28, 13), (28, 12)]:
+    # tree clusters across the world
+    for (x, y) in [(8, 1), (9, 1), (8, 2), (27, 13), (28, 13), (28, 12),
+                   (6, 17), (7, 17), (6, 18), (18, 26), (19, 26), (19, 27),
+                   (11, 24), (12, 24)]:
         world[y][x] = T_TREE
-    for (x, y) in [(9, 10), (26, 11), (3, 12), (28, 2), (12, 4), (6, 10)]:
+    for (x, y) in [(9, 10), (26, 11), (12, 4), (6, 10), (20, 16), (29, 19),
+                   (5, 25), (14, 19), (22, 28), (10, 14), (27, 25)]:
         world[y][x] = T_FLOWER
-    for (x, y) in [(11, 2), (29, 8), (2, 6), (18, 12), (25, 9), (13, 10)]:
+    for (x, y) in [(11, 2), (29, 8), (2, 6), (18, 12), (25, 9), (13, 18),
+                   (8, 28), (21, 20), (30, 27), (4, 14)]:
         world[y][x] = T_BUSH
 
     SOLID = {T_TREE, T_WALL, T_WATER}
@@ -642,28 +653,43 @@ def main():
             return 2
         return 1 if world[my][mx] == T_WATER else 0
 
-    def expand_screen(x0):
-        """Metatile cols x0..x0+15 -> (960-byte tilemap, 64-byte attr table)."""
-        tiles = [[0] * 32 for _ in range(30)]
-        for my in range(HM):
-            for sx in range(16):
-                t0, t1, t2, t3 = cell_ids(x0 + sx, my)
-                tiles[my * 2][sx * 2] = t0
-                tiles[my * 2][sx * 2 + 1] = t1
-                tiles[my * 2 + 1][sx * 2] = t2
-                tiles[my * 2 + 1][sx * 2 + 1] = t3
-        flat = [tiles[y][x] for y in range(30) for x in range(32)]
-        attr = [0] * 64
-        for my in range(HM):
-            for sx in range(16):
-                pal = cell_pal(x0 + sx, my)
-                ab = (my // 2) * 8 + (sx // 2)
-                q = (sx & 1) + (my & 1) * 2
-                attr[ab] |= pal << (q * 2)
-        return flat, attr
+    # worldtiles: the whole world as 8px tiles, 60 tile-rows x 64 tile-cols,
+    # row-major. Within each tile-row the first 32 cols are the LEFT nametable
+    # ($2000, metatile cols 0..15) and the next 32 are the RIGHT ($2400, cols
+    # 16..31). The runtime streams one tile-row strip at a time from here.
+    worldtiles = [0] * (60 * 64)
+    for my in range(HM):
+        for mx in range(WM):
+            t0, t1, t2, t3 = cell_ids(mx, my)
+            col = (0 if mx < 16 else 32) + (mx % 16) * 2
+            r0 = (my * 2) * 64
+            r1 = (my * 2 + 1) * 64
+            worldtiles[r0 + col] = t0
+            worldtiles[r0 + col + 1] = t1
+            worldtiles[r1 + col] = t2
+            worldtiles[r1 + col + 1] = t3
 
-    nt_l, attr_l = expand_screen(0)        # left screen  -> $2000
-    nt_r, attr_r = expand_screen(16)       # right screen -> $2400
+    # Attribute palette-pairs, per metatile-row, per attribute column. One
+    # metatile == one attribute quadrant, so an attr byte combines two metatile
+    # rows (even row -> low nibble, odd row -> high nibble). For each metatile
+    # row we precompute, per attr column (0..7), the pair
+    #   pal(left metatile) | pal(right metatile) << 2   (a 4-bit nibble),
+    # separately for the left and right nametables. The runtime read-modify-
+    # writes its attribute shadow with these by row parity.
+    def attr_pairs(base):
+        rows = []
+        for my in range(HM):
+            row = []
+            for c in range(8):
+                p0 = cell_pal(base + 2 * c, my)
+                p1 = cell_pal(base + 2 * c + 1, my)
+                row.append(p0 | (p1 << 2))
+            rows.append(row)
+        return rows
+    pair_l = attr_pairs(0)     # left nametable, metatile cols 0..15
+    pair_r = attr_pairs(16)    # right nametable, metatile cols 16..31
+    attr_pair_l = [pair_l[my][c] for my in range(HM) for c in range(8)]
+    attr_pair_r = [pair_r[my][c] for my in range(HM) for c in range(8)]
 
     # Per-metatile collision map (1 = solid), indexed [my*WM + mx].
     worldsolid = []
@@ -673,31 +699,27 @@ def main():
             worldsolid.append(1 if solid else 0)
 
     # --- build the window SHELL: frame + blank interior, 32 wide x 8 tall ---
-    # Full-width box at nametable rows 20-27 (so the palette-3 band aligns), with
-    # the frame at the very edge. The runtime renders text into the blank
-    # interior (rows 22-25), so no text is baked here.
+    # (used by the gated text box; unchanged from the previous milestone)
     IN_W = 30
     pad_row = [W_ids["L"]] + [W_ids["FILL"]] * IN_W + [W_ids["R"]]
-    winmap = [W_ids["TL"]] + [W_ids["T"]] * IN_W + [W_ids["TR"]]   # row 0: top border
-    winmap += pad_row                            # row 1: top padding
-    winmap += pad_row * 4                         # rows 2-5: 4 blank text lines
-    winmap += pad_row                            # row 6: bottom padding
-    winmap += [W_ids["BL"]] + [W_ids["B"]] * IN_W + [W_ids["BR"]]  # row 7: bottom border
-
-    # window draw steps: 4 clear (black) + 1 attribute + 4 content, 64 tiles/step.
+    winmap = [W_ids["TL"]] + [W_ids["T"]] * IN_W + [W_ids["TR"]]
+    winmap += pad_row
+    winmap += pad_row * 4
+    winmap += pad_row
+    winmap += [W_ids["BL"]] + [W_ids["B"]] * IN_W + [W_ids["BR"]]
     win_steps = 9
 
     with open(os.path.join(src, "field.s"), "w") as f:
         f.write("; field.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
-        f.write("; Two-screen scrolling world: left + right nametables, a per-metatile\n")
-        f.write("; collision map (worldsolid), and the text window shell.\n\n")
-        f.write(".export fieldmap, fieldattr, ntmap_r, ntattr_r, worldsolid, winmap\n\n")
+        f.write("; 2x2 scrolling world (32x30 metatiles). worldtiles is the whole world\n")
+        f.write("; as 8px tiles (60 rows x 64 cols: [32 left | 32 right] per row); the\n")
+        f.write("; runtime fills the two nametables from it and streams rows on scroll.\n")
+        f.write("; attr_pair_l/r feed the attribute shadow; worldsolid is collision.\n\n")
+        f.write(".export worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap\n\n")
         f.write('.segment "RODATA"\n')
-        f.write("; fieldmap/fieldattr = LEFT screen ($2000); ntmap_r/ntattr_r = RIGHT ($2400)\n")
-        f.write(fmt_bytes("fieldmap", nt_l, 32) + "\n\n")
-        f.write(fmt_bytes("fieldattr", attr_l, 16) + "\n\n")
-        f.write(fmt_bytes("ntmap_r", nt_r, 32) + "\n\n")
-        f.write(fmt_bytes("ntattr_r", attr_r, 16) + "\n\n")
+        f.write(fmt_bytes("worldtiles", worldtiles, 32) + "\n\n")
+        f.write(fmt_bytes("attr_pair_l", attr_pair_l, 8) + "\n\n")
+        f.write(fmt_bytes("attr_pair_r", attr_pair_r, 8) + "\n\n")
         f.write(fmt_bytes("worldsolid", worldsolid, 32) + "\n\n")
         f.write(fmt_bytes("winmap", winmap, 32) + "\n")
 
@@ -761,7 +783,7 @@ def main():
     # console preview (| marks the screen seam at metatile col 16)
     glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "T",
               T_WALL: "#", T_BUSH: "o", T_WATER: "~"}
-    print("World preview, 32x15 metatiles (N = NPC, facing %s):" % NPC_FACING)
+    print("World preview, %dx%d metatiles (N = NPC, facing %s):" % (WM, HM, NPC_FACING))
     for y in range(HM):
         line = ""
         for x in range(WM):

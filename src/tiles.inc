@@ -14,7 +14,7 @@ CURSOR_TILE = $2A   ; menu cursor (right triangle)
 
 ; World geometry (16px metatiles): 2 screens wide, 1 tall.
 WORLD_W = 32
-WORLD_H = 15
+WORLD_H = 30
 ; Text window: full-width box at nametable rows 20-27.
 WIN_STEPS = 9
 TEXT_COLS = 30

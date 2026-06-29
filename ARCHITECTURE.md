@@ -17,7 +17,7 @@ Build: `make` → `6502rpg.nes` (NROM, 32KB PRG + 8KB CHR). Art: regenerate with
 | `src/nes.inc`         | Hardware register constants.                                  |
 | `src/main.s`          | Everything: boot, main loop, NMI, state machine, routines, palettes, tables. |
 | `src/chr.s`           | **Generated.** CHR-ROM tile data (BG table 0, hero table 1). |
-| `src/field.s`         | **Generated.** Two-screen world: `fieldmap`/`fieldattr` (left screen), `ntmap_r`/`ntattr_r` (right screen), `worldsolid` (per-metatile collision), `winmap`. |
+| `src/field.s`         | **Generated.** 2×2 world: `worldtiles` (whole world as 8px tiles, 60×64), `attr_pair_l`/`_r` (attribute palette-pairs per metatile-row), `worldsolid` (per-metatile collision, 32×30), `winmap`. |
 | `src/tiles.inc`       | **Generated.** Tile/geometry constants and message ids (`HERO_*_TILE`, `ENEMY_TILE_BASE`, `WIN_STEPS`, `MSG_*`). |
 | `src/messages.s`      | **Generated.** `msg_table` + wrapped/paginated message byte streams. |
 | `tools/gen_assets.py` | Dev-time art source-of-truth → emits `chr.s` + `field.s`. Not in the `make` path. |
@@ -167,39 +167,53 @@ in RAM (`CopyFrag` + `AppendNumber` → `DIGIT_TILE`) and rendered the same way.
 Index 0 = hero (only one used so far; arrays sized `MAX_ENT`=8). Hero entity data
 is preserved across battle, so `ExitBattle` returns it to the prior position.
 
-## World, camera & scrolling (Milestone 1: 2-screen horizontal slice)
+## World, camera & scrolling (2×2 four-screen world)
 
-The world is **16px metatiles**, `WORLD_W`×`WORLD_H` = 32×15 = **2 screens wide,
-1 tall** (512×240 px), and wraps on both axes (a torus). Each metatile is four
-8px CHR tiles (TL,TR,BL,BR); terrain is the old 8px art **pixel-doubled** by the
-generator. The two screens are pre-expanded into the two nametables (left→`$2000`,
-right→`$2400`); the iNES header uses **vertical mirroring** so they sit
-side-by-side for horizontal scroll. `DrawField` paints both (`BlitScreen` ×2 +
-two attr tables) with rendering off.
+The world is **16px metatiles**, `WORLD_W`×`WORLD_H` = 32×30 = **2×2 screens**
+(512×480 px), wrapping on both axes (a torus). Each metatile is four 8px CHR
+tiles (TL,TR,BL,BR); terrain is the old 8px art **pixel-doubled** by the
+generator. The iNES header uses **vertical mirroring**, so the two physical
+nametables sit side-by-side (512×240 resident): **horizontal scroll is free**
+(both screens always present), but the world's lower half doesn't fit, so the
+**vertical axis is row-streamed**.
 
-**Camera:** `UpdateCamera` (run every frame) keeps the hero at screen center:
-`camX = heroWorldX − 128 (mod 512)`, split into `camX_lo` (PPUSCROLL) and
-`camX_hi` (PPUCTRL base-nametable bit0). NMI writes them after the VBUF flush,
-with Y scroll fixed at 0. The hero is drawn at a **fixed screen X = 128**
-(`BuildOAM`); the world scrolls beneath it (Dragon-Quest style).
+**Camera** (`UpdateCamera`, every frame) keeps the hero at a fixed screen
+position (128,112); the world scrolls beneath it (Dragon-Quest style):
+- `camX = heroWorldX − 128 (mod 512)` → `camX_lo` (PPUSCROLL X) + `camX_hi`
+  (PPUCTRL base-nametable bit 0).
+- `camY = heroWorldY − 112 (mod 480)` → `scrollY = camY mod 240` (PPUSCROLL Y) +
+  `cam_my = camY/16` (the camera's metatile row, for the streamer).
+NMI writes the scroll after the VBUF flush and row-stream writes.
+
+**Row streaming** (`StreamRows` → `BuildStream`, flushed in NMI): the nametable
+holds only 15 metatile-rows, so world rows MY and MY+15 share a slot. On each
+16px vertical crossing, the incoming metatile-row is written into the freed slot
+as six strips — 4 tile strips (32 bytes each: left+right nametable × 2 tile-rows,
+sourced straight from `worldtiles`) and 2 attribute strips (8 bytes each). All
+six fit in one vblank (~144 bytes < budget), so the row is ready the frame it
+becomes visible; the transient seam stays in the top/bottom overscan.
+Attributes use RAM **shadows** (`attr_shadow_l/_r`): one metatile == one attr
+quadrant, so an attr byte mixes two metatile rows (even row → low nibble, odd →
+high), read-modify-written from `attr_pair_l/_r` (`MergeAttrRow`). `DrawField`
+(boot, rendering off) paints world rows 0–29 into both nametables and seeds the
+shadows; the hero starts so `cam_my = 0` to match.
 
 ## Movement & collision
 
-Grid is 16px cells = one metatile each (32 wide × 15 tall). `TryStep` picks the
-target cell, **wrapping at the edges** (`WORLD_W`/`WORLD_H`), and starts a slide
-if it isn't solid. Collision is a single lookup: `CellSolid` reads
-`worldsolid[gy*WORLD_W + gx]` (1 = solid: wall/water/tree/NPC).
+Grid is 16px cells = one metatile each (32×30). `TryStep` picks the target cell,
+**wrapping at the edges** (`WORLD_W`/`WORLD_H`), and slides if it isn't solid.
+Collision is a single lookup: `CellSolid` reads `worldsolid[gy*WORLD_W + gx]`
+(1 = solid: wall/water/tree/NPC).
 
 `StepMove` is **direction-based**, `MOVE_SPEED`(2) px/frame in `ent_dir`. World X
-is **16-bit** (`ent_px` lo + `ent_pxh` hi), wrapping mod 512; Y is 8-bit, mod 240.
-After 16px it snaps the grid cell from the world position
-(`gx = (pxh<<4) | (px>>4)`).
+is 16-bit (`ent_px`/`ent_pxh`), wrapping mod 512; world Y is 16-bit
+(`ent_py`/`ent_pyh`), wrapping mod 480. After 16px it snaps the grid cell from the
+world position (`gx = (pxh<<4)|(px>>4)`, `gy = (pyh<<4)|(py>>4)`).
 
-> **Gated for M1:** the A-menu, encounters, and battle are temporarily disabled
-> on the field (their state handlers remain). The text box draws at fixed
-> nametable addresses and must be made camera-aware before it can reopen under a
-> scrolling camera — that's a later milestone, along with the full 2×2 (4-screen)
-> world and vertical row/column streaming.
+> **Still gated:** the A-menu, encounters, and battle remain disabled on the
+> field (their handlers are intact). The text box / menu / battle draw into fixed
+> nametable addresses and must be made camera-aware before they can reopen under
+> the scrolling camera — that's the next milestone.
 
 -----
 

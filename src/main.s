@@ -13,7 +13,7 @@
 .include "nes.inc"
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
-.import fieldmap, fieldattr, ntmap_r, ntattr_r, worldsolid, winmap, msg_table
+.import worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
 .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
 .import frag_LBL_ATK, frag_LBL_POWER
@@ -127,6 +127,22 @@ vpkt_cnt:     .res 1
 ; camera (NMI reads these to set the scroll position each frame)
 camX_lo:      .res 1   ; horizontal scroll low 8 bits
 camX_hi:      .res 1   ; horizontal scroll bit 8 -> PPUCTRL base-nametable bit0
+cam_y_lo:     .res 1   ; vertical camera position 0..479 (16-bit)
+cam_y_hi:     .res 1
+scrollY:      .res 1   ; PPU vertical scroll for this frame (cam_y mod 240)
+cam_my:       .res 1   ; camera metatile row (cam_y / 16, 0..29)
+prev_cam_my:  .res 1   ; previous frame's cam_my (to detect row crossings)
+stream_row:   .res 1   ; world metatile-row a crossing needs streamed in
+stream_req:   .res 1   ; number of queued stream strips for NMI (0 = none)
+sd_idx:       .res 1   ; scratch: descriptor index while building/flushing
+scnt:         .res 1   ; NMI scratch: current strip byte count
+; row-stream build scratch (main thread)
+rb_lo:        .res 1   ; nametable row base (nmr * 64), 16-bit
+rb_hi:        .res 1
+ms_lo:        .res 1   ; worldtiles source offset (MY * 128 + base), 16-bit
+ms_hi:        .res 1
+bs_par:       .res 1   ; scratch (MY / parity)
+bs_cnt:       .res 1   ; scratch loop counter
 
 ; metasprite build scratch
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
@@ -172,12 +188,28 @@ ent_gx:    .res MAX_ENT   ; grid cell X (16px cells, 0..WORLD_W-1)
 ent_gy:    .res MAX_ENT   ; grid cell Y (0..WORLD_H-1)
 ent_px:    .res MAX_ENT   ; world pixel X, low byte (top-left)
 ent_pxh:   .res MAX_ENT   ; world pixel X, high bit (world is 512px wide)
-ent_py:    .res MAX_ENT   ; world pixel Y (top-left)
+ent_py:    .res MAX_ENT   ; world pixel Y, low byte (top-left)
+ent_pyh:   .res MAX_ENT   ; world pixel Y, high bit (world is 480px tall)
 ent_dir:   .res MAX_ENT   ; facing direction
 ent_state: .res MAX_ENT   ; ST_IDLE / ST_MOVE
 ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 
 msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
+
+; Attribute-table shadows (RAM copies of the two nametables' attributes). The
+; row streamer read-modify-writes these (one metatile == one attr quadrant, so
+; an attr byte mixes two metatile rows) and copies the touched bytes to VRAM.
+attr_shadow_l: .res 64
+attr_shadow_r: .res 64
+
+; Row-stream descriptors: up to 6 strips per crossing (4 tile + 2 attribute),
+; filled by the main thread, written to VRAM by the NMI. Parallel arrays.
+STREAM_MAX = 6
+sd_dst_hi: .res STREAM_MAX  ; PPU dest address high
+sd_dst_lo: .res STREAM_MAX  ; PPU dest address low
+sd_cnt:    .res STREAM_MAX  ; byte count
+sd_src_lo: .res STREAM_MAX  ; source pointer low
+sd_src_hi: .res STREAM_MAX  ; source pointer high
 
 ; ----------------------------------------------------------------------------
 ; RESET
@@ -250,6 +282,7 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     jsr VBufClear       ; default: no nametable update this frame
     jsr UpdateGame      ; hero logic and/or a window draw step
     jsr UpdateCamera    ; recompute scroll from the hero's world position
+    jsr StreamRows      ; queue an incoming metatile row on a vertical crossing
     ; The hero is on screen everywhere except the battle screen.
     lda in_battle
     bne @hide
@@ -304,13 +337,46 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     bne @flush
 @noflush:
 
-    ; Set scroll after any potential $2006 write this frame. The camera's
-    ; high bit selects which nametable is top-left (horizontal scroll spans the
-    ; two side-by-side screens). Vertical scroll is fixed at 0 (world is 1 tall).
+    ; Row streaming: write the incoming metatile-row's strips (queued by the
+    ; main thread on a vertical crossing). Each descriptor is a contiguous run
+    ; copied from a source pointer (PRG worldtiles, or the RAM attr shadow).
+    lda stream_req
+    beq @nostream
+    sta sd_idx
+@strip:
+    ldx sd_idx
+    dex
+    bit PPUSTATUS
+    lda sd_dst_hi,x
+    sta PPUADDR
+    lda sd_dst_lo,x
+    sta PPUADDR
+    lda sd_src_lo,x
+    sta ptr
+    lda sd_src_hi,x
+    sta ptr+1
+    lda sd_cnt,x
+    sta scnt
+    ldy #0
+@scopy:
+    lda (ptr),y
+    sta PPUDATA
+    iny
+    cpy scnt
+    bne @scopy
+    dec sd_idx
+    bne @strip
+    lda #0
+    sta stream_req
+@nostream:
+
+    ; Set scroll after the $2006 writes this frame. camX high bit selects which
+    ; nametable is top-left (horizontal spans the two side-by-side screens);
+    ; scrollY is the camera's position within the row-streamed nametable.
     bit PPUSTATUS
     lda camX_lo
     sta PPUSCROLL
-    lda #$00
+    lda scrollY
     sta PPUSCROLL
     lda #%10001000
     ora camX_hi
@@ -346,7 +412,7 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 .proc InitGame
     ldx #HERO
     lda #4
-    sta ent_gx,x        ; start on open grass, left screen
+    sta ent_gx,x        ; start on open grass, top-left screen
     lda #9
     sta ent_gy,x
     lda #4 * 16
@@ -355,12 +421,18 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     sta ent_pxh,x       ; left screen -> high bit clear
     lda #9 * 16
     sta ent_py,x
+    lda #0
+    sta ent_pyh,x       ; top half of the world -> high bit clear
     lda #DIR_DOWN
     sta ent_dir,x
     lda #ST_IDLE
     sta ent_state,x
 
+    lda #0
+    sta stream_req      ; no pending row stream
     jsr UpdateCamera    ; seed the camera before the first frame
+    lda cam_my
+    sta prev_cam_my     ; no spurious crossing on the first frame
 
     lda #0              ; start equipped with weapon 0 (Club)
     sta equipped
@@ -515,9 +587,9 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 .endproc
 
 ; Slide the hero MOVE_SPEED pixels in ent_dir. World position is canonical and
-; wraps: X is 16-bit (mod 512 = two-screen world width), Y is 8-bit (mod 240 =
-; world height). When 16px have been covered, snap the grid cell from the world
-; position. X = entity index.
+; wraps: X is 16-bit (mod 512 = two-screen world width), Y is 16-bit (mod 480 =
+; two-screen world height). When 16px have been covered, snap the grid cell from
+; the world position. X = entity index.
 .proc StepMove
     lda ent_dir,x
     cmp #DIR_LEFT
@@ -552,26 +624,38 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 @nu:
     cmp #DIR_UP
     bne @down
-    lda ent_py,x        ; up: subtract, wrap mod 240
+    lda ent_py,x        ; up: 16-bit subtract, wrap below 0 -> 478
     sec
     sbc #MOVE_SPEED
     sta ent_py,x
-    cmp #240
-    bcc @tick
-    sec
-    sbc #16             ; underflow: convert byte-mod-256 to mod-240
+    lda ent_pyh,x
+    sbc #0
+    sta ent_pyh,x
+    bpl @tick           ; >= 0 -> fine
+    lda ent_py,x        ; underflowed: + 480 ($01E0)
+    clc
+    adc #$E0
     sta ent_py,x
+    lda ent_pyh,x
+    adc #$01
+    sta ent_pyh,x
     jmp @tick
 @down:
-    lda ent_py,x        ; down: add, wrap mod 240
+    lda ent_py,x        ; down: 16-bit add, wrap at 480 -> 0
     clc
     adc #MOVE_SPEED
     sta ent_py,x
-    cmp #240
+    lda ent_pyh,x
+    adc #0
+    sta ent_pyh,x
+    cmp #$01            ; worldY >= 480 ? (hi == 1 and lo >= 224)
+    bne @tick
+    lda ent_py,x
+    cmp #$E0
     bcc @tick
-    sec
-    sbc #240
+    lda #0              ; wrap to world Y = 0
     sta ent_py,x
+    sta ent_pyh,x
 
 @tick:
     lda ent_timer,x
@@ -593,11 +677,18 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lsr a
     ora ent_gx,x
     sta ent_gx,x
-    lda ent_py,x        ; gy = worldY / 16
+    lda ent_pyh,x       ; gy = worldY / 16 = (pyh*16) | (py >> 4)
+    asl a
+    asl a
+    asl a
+    asl a
+    sta ent_gy,x
+    lda ent_py,x
     lsr a
     lsr a
     lsr a
     lsr a
+    ora ent_gy,x
     sta ent_gy,x
     lda #ST_IDLE
     sta ent_state,x
@@ -662,15 +753,12 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     lda #$00
     sta oamoff          ; slot * 4
 @slot:
-    ; Y (screen) = (py + slot_dy) wrapped at the bottom seam (240), then - 1
-    lda ent_py
+    ; Y (screen) = 112 + slot_dy - 1. The camera keeps the hero centered on
+    ; both axes, so its screen position is fixed and the world scrolls beneath.
+    lda #112
     clc
     adc slot_dy,x
-    cmp #240
-    bcc :+
     sec
-    sbc #240
-:   sec
     sbc #1
     ldy oamoff
     sta oam,y
@@ -705,13 +793,16 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 .endproc
 
 ; ----------------------------------------------------------------------------
-; UpdateCamera — center the camera on the hero: camX = heroWorldX - 128, taken
-; mod 512 (the world wraps). The 9-bit result is split into camX_lo (low 8 bits,
-; the PPUSCROLL value) and camX_hi (bit 8, the base-nametable select). With the
-; hero held at screen X = 128, the world scrolls smoothly beneath it.
+; UpdateCamera — center the camera on the hero (held at screen 128,112) so the
+; world scrolls beneath it.
+;   camX = heroWorldX - 128 (mod 512) -> camX_lo + camX_hi (nametable select)
+;   camY = heroWorldY - 112 (mod 480) -> cam_y_lo/hi; then:
+;     scrollY = camY mod 240  (position within the row-streamed nametable)
+;     cam_my  = camY / 16      (camera's metatile row, for the streamer)
 ; ----------------------------------------------------------------------------
 .proc UpdateCamera
     ldx #HERO
+    ; --- horizontal ---
     lda ent_px,x
     sec
     sbc #128
@@ -720,6 +811,100 @@ msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
     sbc #0
     and #$01            ; mod 512: keep only bit 8 (handles the borrow case)
     sta camX_hi
+
+    ; --- vertical: camY = heroWorldY - 112, wrap into 0..479 ---
+    lda ent_py,x
+    sec
+    sbc #112
+    sta cam_y_lo
+    lda ent_pyh,x
+    sbc #0
+    sta cam_y_hi
+    bpl @nowrap
+    lda cam_y_lo        ; underflowed -> + 480 ($01E0)
+    clc
+    adc #$E0
+    sta cam_y_lo
+    lda cam_y_hi
+    adc #$01
+    sta cam_y_hi
+@nowrap:
+
+    ; scrollY = camY mod 240 (subtract 240 once if camY >= 240)
+    lda cam_y_hi
+    bne @sub
+    lda cam_y_lo
+    cmp #240
+    bcc @lt
+@sub:
+    lda cam_y_lo
+    sec
+    sbc #240
+    sta scrollY
+    jmp @mrow
+@lt:
+    lda cam_y_lo
+    sta scrollY
+
+    ; cam_my = camY / 16 = (cam_y_hi << 4) | (cam_y_lo >> 4)
+@mrow:
+    lda cam_y_lo
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta cam_my
+    lda cam_y_hi
+    beq @done
+    lda cam_my
+    clc
+    adc #16
+    sta cam_my
+@done:
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; StreamRows — when the camera crosses into a new metatile row, queue the
+; incoming row's strips for the NMI to write (4 tile strips + 2 attribute
+; strips). The world is 30 metatile rows tall but the nametable holds only 15,
+; so world rows MY and MY+15 share a nametable slot; we overwrite the freed slot
+; with the row scrolling in. The transient seam stays in the top/bottom overscan.
+; ----------------------------------------------------------------------------
+.proc StreamRows
+    lda cam_my
+    cmp prev_cam_my
+    beq @none           ; no crossing this frame
+
+    ; Determine the incoming world metatile-row.
+    ;   moving down: new bottom row = cam_my + 14
+    ;   moving up:   new top row    = cam_my
+    ; "down" iff cam_my == (prev_cam_my + 1) mod 30.
+    lda prev_cam_my
+    clc
+    adc #1
+    cmp #30
+    bcc :+
+    lda #0
+:   cmp cam_my
+    bne @up
+    ; down
+    lda cam_my
+    clc
+    adc #14
+    cmp #30
+    bcc @setrow
+    sbc #30             ; carry set here -> mod 30
+    jmp @setrow
+@up:
+    lda cam_my
+@setrow:
+    sta stream_row
+    lda cam_my
+    sta prev_cam_my
+    jsr BuildStream
+    rts
+@none:
     rts
 .endproc
 
@@ -1466,7 +1651,9 @@ weapon_atk:
     sta ptr+1
     jmp @build
 @content_close:
-    lda woff2           ; close content: fieldmap + 640 + offset
+    ; close content source (gated dialog; re-wired to the camera in Milestone 3).
+    ; Points at worldtiles + 640 + offset purely so the gated path links.
+    lda woff2
     clc
     adc #$80
     sta ptr
@@ -1475,10 +1662,10 @@ weapon_atk:
     sta ptr+1
     lda ptr
     clc
-    adc #<fieldmap
+    adc #<worldtiles
     sta ptr
     lda ptr+1
-    adc #>fieldmap
+    adc #>worldtiles
     sta ptr+1
     jmp @build
 @clear_src:
@@ -1504,9 +1691,9 @@ weapon_atk:
     sta ptr+1
     jmp @build
 @attr_close:
-    lda #<(fieldattr + 40)   ; close: restore original attributes
+    lda #<(attr_pair_l + 40)   ; gated close-attr source (re-wired in Milestone 3)
     sta ptr
-    lda #>(fieldattr + 40)
+    lda #>(attr_pair_l + 40)
     sta ptr+1
 
 @build:
@@ -1753,83 +1940,330 @@ slot_dy:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; DrawField — paint the whole two-screen world: the left screen to nametable 0
-; ($2000, attrs $23C0) and the right screen to nametable 1 ($2400, attrs $27C0).
-; Init-time / full-redraw only (rendering off).
+; DrawField — paint the top screen of the world (world tile-rows 0..29) into the
+; two nametables and seed the attribute shadows. Assumes the camera starts at
+; world row 0 (InitGame places the hero so cam_my = 0). Rendering off only.
 ; ----------------------------------------------------------------------------
 .proc DrawField
-    ; Left screen tiles -> $2000.
-    bit PPUSTATUS
-    lda #$20
-    sta PPUADDR
-    lda #$00
-    sta PPUADDR
-    lda #<fieldmap
+    lda #<worldtiles
     sta ptr
-    lda #>fieldmap
+    lda #>worldtiles
     sta ptr+1
-    jsr BlitScreen
+    lda #$00
+    sta vpkt_lo         ; dst low byte (reused as temp)
+    lda #$20
+    sta vpkt_cnt        ; dst high byte (reused as temp)
+    ldx #30             ; tile-rows remaining
+@row:
+    ; LEFT 32 -> $2000 + row*32
+    bit PPUSTATUS
+    lda vpkt_cnt
+    sta PPUADDR
+    lda vpkt_lo
+    sta PPUADDR
+    ldy #0
+@l: lda (ptr),y
+    sta PPUDATA
+    iny
+    cpy #32
+    bne @l
+    ; RIGHT 32 -> $2400 + row*32 (dst high + $04, src + 32)
+    bit PPUSTATUS
+    lda vpkt_cnt
+    clc
+    adc #$04
+    sta PPUADDR
+    lda vpkt_lo
+    sta PPUADDR
+    ldy #32
+@r: lda (ptr),y
+    sta PPUDATA
+    iny
+    cpy #64
+    bne @r
+    ; advance source by 64, dest by 32
+    lda ptr
+    clc
+    adc #64
+    sta ptr
+    bcc :+
+    inc ptr+1
+:   lda vpkt_lo
+    clc
+    adc #32
+    sta vpkt_lo
+    bcc :+
+    inc vpkt_cnt
+:   dex
+    bne @row
 
-    ; Left attributes -> $23C0.
+    jsr InitAttrShadow
+    rts
+.endproc
+
+; InitAttrShadow — build the attribute shadows for world metatile-rows 0..14 and
+; copy them to both nametables' attribute tables. Rendering off only.
+.proc InitAttrShadow
+    ldx #63             ; clear both shadows
+    lda #0
+@clr:
+    sta attr_shadow_l,x
+    sta attr_shadow_r,x
+    dex
+    bpl @clr
+
+    lda #0
+    sta tpx             ; MY loop counter (MergeAttrRow clobbers X/Y)
+@m:
+    lda tpx
+    jsr MergeAttrRow
+    inc tpx
+    lda tpx
+    cmp #15
+    bne @m
+
+    bit PPUSTATUS       ; left attributes -> $23C0
     lda #$23
     sta PPUADDR
     lda #$C0
     sta PPUADDR
-    ldx #$00
-@al:
-    lda fieldattr,x
+    ldx #0
+@wl:
+    lda attr_shadow_l,x
     sta PPUDATA
     inx
     cpx #64
-    bne @al
+    bne @wl
 
-    ; Right screen tiles -> $2400.
-    lda #$24
-    sta PPUADDR
-    lda #$00
-    sta PPUADDR
-    lda #<ntmap_r
-    sta ptr
-    lda #>ntmap_r
-    sta ptr+1
-    jsr BlitScreen
-
-    ; Right attributes -> $27C0.
+    bit PPUSTATUS       ; right attributes -> $27C0
     lda #$27
     sta PPUADDR
     lda #$C0
     sta PPUADDR
-    ldx #$00
-@ar:
-    lda ntattr_r,x
+    ldx #0
+@wr:
+    lda attr_shadow_r,x
     sta PPUDATA
     inx
     cpx #64
-    bne @ar
+    bne @wr
     rts
 .endproc
 
-; BlitScreen — copy 960 nametable bytes from (ptr) to PPUDATA (PPUADDR preset).
-; 960 = 3 full 256-byte pages + 192. Clobbers ptr, X, Y, A.
-.proc BlitScreen
-    ldx #$03
-@page:
-    ldy #$00
-@byte:
-    lda (ptr),y
-    sta PPUDATA
+; MergeAttrRow — fold world metatile-row MY (in A) into the attribute shadows.
+; One metatile is one attr quadrant, so an attr byte mixes two metatile rows:
+; an even nametable row writes the low nibble, an odd row the high nibble. The
+; nametable slot is nmr = MY mod 15. Leaves abase (= (nmr/2)*8) in sd_idx for the
+; caller. Clobbers A, X, Y, rb_lo, rb_hi, bs_par, bs_cnt.
+.proc MergeAttrRow
+    sta bs_par          ; bs_par = MY
+    cmp #15             ; nmr = MY mod 15  (MY < 30 -> one subtract)
+    bcc :+
+    sbc #15
+:   sta rb_lo           ; rb_lo = nmr
+    lsr a               ; abase = (nmr/2)*8
+    asl a
+    asl a
+    asl a
+    sta sd_idx
+    lda rb_lo           ; parity = nmr & 1
+    and #$01
+    sta rb_hi
+    lda bs_par          ; pbase = MY*8 -> Y
+    asl a
+    asl a
+    asl a
+    tay
+    ldx sd_idx          ; shadow index -> X
+    lda #8
+    sta bs_cnt
+    lda rb_hi
+    bne @odd
+@even:
+    lda attr_shadow_l,x
+    and #$F0
+    ora attr_pair_l,y
+    sta attr_shadow_l,x
+    lda attr_shadow_r,x
+    and #$F0
+    ora attr_pair_r,y
+    sta attr_shadow_r,x
+    inx
     iny
-    bne @byte
-    inc ptr+1
+    dec bs_cnt
+    bne @even
+    rts
+@odd:
+    lda attr_pair_l,y
+    asl a
+    asl a
+    asl a
+    asl a
+    sta rb_lo
+    lda attr_shadow_l,x
+    and #$0F
+    ora rb_lo
+    sta attr_shadow_l,x
+    lda attr_pair_r,y
+    asl a
+    asl a
+    asl a
+    asl a
+    sta rb_lo
+    lda attr_shadow_r,x
+    and #$0F
+    ora rb_lo
+    sta attr_shadow_r,x
+    inx
+    iny
+    dec bs_cnt
+    bne @odd
+    rts
+.endproc
+
+; BuildStream — fill the 6 stream descriptors for world metatile-row stream_row
+; (4 tile strips of 32 + 2 attribute strips of 8), then arm stream_req so the
+; next NMI writes them. nmr = stream_row mod 15 is the nametable slot.
+.proc BuildStream
+    ; rowbase16 = nmr * 64
+    lda stream_row
+    cmp #15
+    bcc :+
+    sbc #15
+:   sta rb_lo
+    lda #0
+    sta rb_hi
+    ldx #6
+@sh:
+    asl rb_lo
+    rol rb_hi
     dex
-    bne @page
-    ldy #$00            ; remaining 192 bytes (ptr now at base+768)
-@tail:
-    lda (ptr),y
-    sta PPUDATA
-    iny
-    cpy #192
-    bne @tail
+    bne @sh
+
+    ; source offset = stream_row * 128 + worldtiles
+    lda #0
+    sta ms_hi
+    lda stream_row
+    sta ms_lo
+    ldx #7
+@sh2:
+    asl ms_lo
+    rol ms_hi
+    dex
+    bne @sh2
+    lda ms_lo
+    clc
+    adc #<worldtiles
+    sta ms_lo
+    lda ms_hi
+    adc #>worldtiles
+    sta ms_hi
+
+    ; desc 0: LEFT tile-row 0  -> $2000 + rowbase
+    lda #$20
+    clc
+    adc rb_hi
+    sta sd_dst_hi+0
+    lda rb_lo
+    sta sd_dst_lo+0
+    lda ms_lo
+    sta sd_src_lo+0
+    lda ms_hi
+    sta sd_src_hi+0
+    lda #32
+    sta sd_cnt+0
+    ; desc 1: RIGHT tile-row 0 -> $2400 + rowbase, src + 32
+    lda #$24
+    clc
+    adc rb_hi
+    sta sd_dst_hi+1
+    lda rb_lo
+    sta sd_dst_lo+1
+    lda ms_lo
+    clc
+    adc #32
+    sta sd_src_lo+1
+    lda ms_hi
+    adc #0
+    sta sd_src_hi+1
+    lda #32
+    sta sd_cnt+1
+    ; desc 2: LEFT tile-row 1  -> $2000 + rowbase + 32, src + 64
+    lda rb_lo
+    clc
+    adc #32
+    sta sd_dst_lo+2
+    lda #$20
+    adc rb_hi
+    sta sd_dst_hi+2
+    lda ms_lo
+    clc
+    adc #64
+    sta sd_src_lo+2
+    lda ms_hi
+    adc #0
+    sta sd_src_hi+2
+    lda #32
+    sta sd_cnt+2
+    ; desc 3: RIGHT tile-row 1 -> $2400 + rowbase + 32, src + 96
+    lda rb_lo
+    clc
+    adc #32
+    sta sd_dst_lo+3
+    lda #$24
+    adc rb_hi
+    sta sd_dst_hi+3
+    lda ms_lo
+    clc
+    adc #96
+    sta sd_src_lo+3
+    lda ms_hi
+    adc #0
+    sta sd_src_hi+3
+    lda #32
+    sta sd_cnt+3
+
+    ; attributes: fold this row into the shadows; abase returned in sd_idx
+    lda stream_row
+    jsr MergeAttrRow
+
+    ; desc 4: LEFT attr  -> $23C0 + abase, src attr_shadow_l + abase
+    lda sd_idx
+    clc
+    adc #$C0
+    sta sd_dst_lo+4
+    lda #$23
+    adc #0
+    sta sd_dst_hi+4
+    lda #<attr_shadow_l
+    clc
+    adc sd_idx
+    sta sd_src_lo+4
+    lda #>attr_shadow_l
+    adc #0
+    sta sd_src_hi+4
+    lda #8
+    sta sd_cnt+4
+    ; desc 5: RIGHT attr -> $27C0 + abase, src attr_shadow_r + abase
+    lda sd_idx
+    clc
+    adc #$C0
+    sta sd_dst_lo+5
+    lda #$27
+    adc #0
+    sta sd_dst_hi+5
+    lda #<attr_shadow_r
+    clc
+    adc sd_idx
+    sta sd_src_lo+5
+    lda #>attr_shadow_r
+    adc #0
+    sta sd_src_hi+5
+    lda #8
+    sta sd_cnt+5
+
+    lda #STREAM_MAX
+    sta stream_req      ; arm: the next NMI writes all 6 strips
     rts
 .endproc
 

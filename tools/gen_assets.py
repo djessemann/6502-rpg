@@ -300,10 +300,10 @@ TEXT_W, TEXT_H = 30, 4   # interior width / lines per page
 
 MESSAGES = [
     # name, text
+    # "\f" forces a page break (press A to advance to the next page).
     ("NPC_GREETING",
-     "Erdrick, listen now to my words. In ages past, a hero "
-     "sealed the demon with a Ball of Light. Seek it, brave "
-     "one, and face the darkness that wakes once more."),
+     "Hi Knoah this Taeko\f"
+     "Welcome to the sexy zone"),
     ("SLIME_APPEARS", "A Slime draws near!"),
     ("SLIME_DEFEATED", "The Slime is defeated!"),
     ("NOBODY", "There is no one there."),
@@ -490,13 +490,18 @@ def wrap_text(text, width):
 
 
 def encode_message(text, font_id):
-    """Wrap + paginate `text` into the runtime byte stream (see MESSAGES)."""
-    lines = wrap_text(text, TEXT_W)
+    """Wrap + paginate `text` into the runtime byte stream (see MESSAGES).
+    A form-feed ("\\f") in the source forces a page break."""
+    pages = []
+    for segment in text.split("\f"):
+        lines = wrap_text(segment, TEXT_W)
+        for p in range(0, max(len(lines), 1), TEXT_H):
+            pages.append(lines[p:p + TEXT_H])
+
     out = []
-    for p in range(0, max(len(lines), 1), TEXT_H):
-        page = lines[p:p + TEXT_H]
-        page += [""] * (TEXT_H - len(page))         # pad to 4 lines
-        last_page = p + TEXT_H >= len(lines)
+    for pi, page in enumerate(pages):
+        page = list(page) + [""] * (TEXT_H - len(page))   # pad to 4 lines
+        last_page = pi == len(pages) - 1
         for i, line in enumerate(page):
             for ch in line:
                 out.append(0x00 if ch == " " else font_id[ch])

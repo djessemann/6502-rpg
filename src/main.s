@@ -14,6 +14,7 @@
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
 .import fieldmap, fieldattr, winmap, msg_table
+.import frag_DMG_PRE, frag_DMG_POST
 
 ; ----------------------------------------------------------------------------
 ; Constants
@@ -38,6 +39,19 @@ GS_ENEMYDIE = 5         ; erasing the enemy tiles (one row per frame)
 GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
 GS_TEXT    = 7          ; rendering message lines into the open box
 GS_TEXTWAIT = 8         ; page full ("more" prompt shown), waiting for A
+GS_BWAIT   = 9          ; battle message shown, waiting for A to advance combat
+
+; message context: where GS_TEXT goes when a message ends
+CTX_FIELD  = 0          ; -> GS_DIALOG (wait A, then close)
+CTX_BATTLE = 1          ; -> GS_BWAIT (drive the battle)
+
+; battle phases (what the pending A press does)
+BP_INTRO   = 0          ; intro shown; A -> first attack
+BP_FIGHT   = 1          ; damage shown, enemy alive; A -> attack again
+BP_DEAD    = 2          ; damage shown, enemy at 0; A -> defeat message
+BP_DEFEATED = 3         ; defeat shown; A -> erase enemy and return
+
+ENEMY_MAX_HP = 15
 
 ; WIN_STEPS comes from tiles.inc (window draw chunks). Window is a full-width
 ; box at nametable rows 20-27; nametable base of row 20 = $2000 + 20*32 = $2280.
@@ -114,9 +128,17 @@ woff2:        .res 1   ; window draw: byte offset (k * 64)
 
 ; text engine
 msg_ptr:      .res 2   ; pointer into the current message byte stream
+dst:          .res 2   ; compose destination pointer
 cur_line:     .res 1   ; interior line being rendered (0..TEXT_LINES-1)
 term_action:  .res 1   ; how the last line ended: 0=newline 1=page 2=end
 aux_flag:     .res 1   ; one-shot latch (e.g. "prompt drawn")
+msg_context:  .res 1   ; CTX_FIELD / CTX_BATTLE
+in_battle:    .res 1   ; nonzero while on the battle screen (hides the hero)
+
+; battle / combat
+enemy_hp:     .res 1
+last_damage:  .res 1
+battle_phase: .res 1
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -135,6 +157,8 @@ ent_py:    .res MAX_ENT   ; sprite pixel Y (top-left)
 ent_dir:   .res MAX_ENT   ; facing direction
 ent_state: .res MAX_ENT   ; ST_IDLE / ST_MOVE
 ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
+
+msg_buf:   .res 40        ; runtime-composed message (e.g. damage line)
 
 ; ----------------------------------------------------------------------------
 ; RESET
@@ -206,17 +230,13 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     jsr ReadInput
     jsr VBufClear       ; default: no nametable update this frame
     jsr UpdateGame      ; hero logic and/or a window draw step
-    ; Hide the hero only during the battle states (GS_BATTLE..GS_BATTLEWAIT).
-    ; Field, dialog AND text states keep the hero on screen.
-    lda gamestate
-    cmp #GS_BATTLE
-    bcc @drawhero       ; < GS_BATTLE: field / opening / dialog / closing
-    cmp #GS_TEXT
-    bcs @drawhero       ; >= GS_TEXT: text states (still on the field)
-    jsr HideHero        ; GS_BATTLE / GS_ENEMYDIE / GS_BATTLEWAIT
+    ; The hero is on screen everywhere except the battle screen.
+    lda in_battle
+    bne @hide
+    jsr BuildOAM
     jmp @sync
-@drawhero:
-    jsr BuildOAM        ; draw the hero metasprite
+@hide:
+    jsr HideHero
 @sync:
     jsr WaitFrame       ; NMI flushes the VRAM buffer + OAM while we wait
     jmp @loop
@@ -663,9 +683,9 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 :   cmp #GS_CLOSING
     bne :+
     jmp @closing
-:   cmp #GS_BATTLE
+:   cmp #GS_BWAIT
     bne :+
-    jmp @battle
+    jmp @bwait
 :   cmp #GS_ENEMYDIE
     bne :+
     jmp @enemydie
@@ -703,6 +723,8 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     beq @ret
     jsr FacingNPC       ; carry set if adjacent to and facing the NPC
     bcc @ret
+    lda #CTX_FIELD
+    sta msg_context
     lda #MSG_NPC_GREETING
     jsr SetMessage
     lda #0
@@ -718,14 +740,50 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     jsr EnterBattle
     rts
 
-@battle:
-    ; Wait for the attack button.
+@bwait:
+    ; A battle message is on screen; A advances combat per battle_phase.
     lda pad1_new
     and #BTN_A
     beq @ret
+    lda battle_phase
+    cmp #BP_DEFEATED
+    beq @bw_done
+    cmp #BP_DEAD
+    beq @bw_defeat
+    ; BP_INTRO or BP_FIGHT -> attack
+    jsr DoAttack            ; sets last_damage, decrements enemy_hp, composes msg
+    lda #<msg_buf
+    sta msg_ptr
+    lda #>msg_buf
+    sta msg_ptr+1
+    lda enemy_hp
+    bne @bw_alive
+    lda #BP_DEAD
+    sta battle_phase
+    jmp @bw_show
+@bw_alive:
+    lda #BP_FIGHT
+    sta battle_phase
+@bw_show:
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+    rts
+@bw_defeat:
+    lda #MSG_SLIME_DEFEATED
+    jsr SetMessage
+    lda #BP_DEFEATED
+    sta battle_phase
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+    rts
+@bw_done:
     lda #0
     sta job_step
-    lda #GS_ENEMYDIE
+    lda #GS_ENEMYDIE        ; erase the enemy, then ExitBattle
     sta gamestate
     rts
 
@@ -776,7 +834,14 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     sta gamestate
     rts
 @text_end:
-    lda #GS_DIALOG
+    lda msg_context
+    cmp #CTX_BATTLE
+    bne @text_field
+    lda #GS_BWAIT       ; battle: wait for A to drive combat
+    sta gamestate
+    rts
+@text_field:
+    lda #GS_DIALOG      ; field: wait for A, then close
     sta gamestate
 @ret3:
     rts
@@ -834,6 +899,103 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     lda msg_table+1,y
     sta msg_ptr+1
     rts
+.endproc
+
+; DoAttack — deal damage to the enemy and compose the "takes N damage" line.
+; Damage is a small varying value (4-7) capped to the remaining HP.
+.proc DoAttack
+    lda frame_count
+    and #$03
+    clc
+    adc #4              ; 4..7
+    cmp enemy_hp
+    bcc :+
+    lda enemy_hp        ; never report more than what's left
+:   sta last_damage
+    lda enemy_hp
+    sec
+    sbc last_damage
+    sta enemy_hp
+    ; fall through to compose the message
+.endproc
+
+; ComposeDamage — build "<DMG_PRE><last_damage><DMG_POST>" + 3 blank lines + end
+; into msg_buf, ready for RenderLine.
+.proc ComposeDamage
+    lda #<msg_buf
+    sta dst
+    lda #>msg_buf
+    sta dst+1
+    lda #<frag_DMG_PRE
+    sta ptr
+    lda #>frag_DMG_PRE
+    sta ptr+1
+    jsr CopyFrag
+    jsr AppendNumber
+    lda #<frag_DMG_POST
+    sta ptr
+    lda #>frag_DMG_POST
+    sta ptr+1
+    jsr CopyFrag
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    lda #MSG_NEWLINE
+    jsr StoreDst
+    lda #MSG_END
+    jsr StoreDst
+    rts
+.endproc
+
+; CopyFrag — append the $FF-terminated tile stream at (ptr) to (dst).
+.proc CopyFrag
+@l:
+    ldy #0
+    lda (ptr),y
+    cmp #$FF
+    beq @done
+    jsr StoreDst
+    inc ptr
+    bne @l
+    inc ptr+1
+    jmp @l
+@done:
+    rts
+.endproc
+
+; AppendNumber — append last_damage as 1-2 decimal digit tiles to (dst).
+.proc AppendNumber
+    lda last_damage
+    ldx #$FF
+@div:
+    inx
+    sec
+    sbc #10
+    bcs @div
+    adc #10             ; A = ones, X = tens
+    pha                 ; save ones
+    txa
+    beq @ones           ; no tens digit
+    clc
+    adc #DIGIT_TILE
+    jsr StoreDst
+@ones:
+    pla
+    clc
+    adc #DIGIT_TILE
+    jsr StoreDst
+    rts
+.endproc
+
+; StoreDst — store A at (dst) and advance dst.
+.proc StoreDst
+    ldy #0
+    sta (dst),y
+    inc dst
+    bne :+
+    inc dst+1
+:   rts
 .endproc
 
 ; RenderLine — render one interior line (cur_line) of the current message into
@@ -1157,7 +1319,20 @@ slot_dy:
     lda #%00011110
     sta PPUMASK         ; rendering on
 
-    lda #GS_BATTLE
+    ; Begin combat: set up state, then open the message box and show the intro.
+    lda #1
+    sta in_battle
+    lda #ENEMY_MAX_HP
+    sta enemy_hp
+    lda #BP_INTRO
+    sta battle_phase
+    lda #CTX_BATTLE
+    sta msg_context
+    lda #MSG_SLIME_APPEARS
+    jsr SetMessage
+    lda #0
+    sta job_step
+    lda #GS_OPENING     ; open the box; GS_OPENING -> GS_TEXT renders the intro
     sta gamestate
     rts
 .endproc
@@ -1253,6 +1428,8 @@ slot_dy:
     lda #%00011110
     sta PPUMASK
 
+    lda #$00
+    sta in_battle
     lda #GS_FIELD
     sta gamestate
     rts
@@ -1360,19 +1537,17 @@ pal_field:
     .byte $0F, $0F, $30, $0F
 
 pal_battle:
-    ; Battle backdrop = blue ($11), clearly distinct from the field. Tiles are
-    ; blank for now (Step 6 adds the enemy); remaining entries seeded for it.
-    ; NOTE: the first entry of each sprite-palette row ($3F10/$14/$18/$1C) must
-    ; match the backdrop ($11) because those addresses mirror $3F00/$04/$08/$0C;
-    ; writing $0F there would clobber the backdrop to black.
-    .byte $11, $0F, $10, $30   ; 0: (unused on the blank screen)
-    .byte $11, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
-    .byte $11, $0F, $10, $30
-    .byte $11, $0F, $10, $30
-    .byte $11, $16, $27, $30
-    .byte $11, $06, $16, $30
-    .byte $11, $0C, $1C, $30
-    .byte $11, $0F, $30, $0F
+    ; Battle backdrop = black ($0F): the classic JRPG arena, and the color the
+    ; text box needs (the box's black is value 0 = the backdrop). Every color-0
+    ; entry is $0F so the $3F1x->$3F0x mirror can't clobber the backdrop.
+    .byte $0F, $0F, $10, $30   ; 0: blank screen
+    .byte $0F, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
+    .byte $0F, $0F, $10, $30
+    .byte $0F, $30, $0F, $16   ; 3: window - black paper, white ink
+    .byte $0F, $16, $27, $30
+    .byte $0F, $06, $16, $30
+    .byte $0F, $0C, $1C, $30
+    .byte $0F, $0F, $30, $0F
 
 ; ----------------------------------------------------------------------------
 ; Interrupt vectors

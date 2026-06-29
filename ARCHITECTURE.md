@@ -106,17 +106,29 @@ and NMI disabled (`EnterBattle`/`ExitBattle`/boot).
 ## Game state machine (`gamestate`, driven in `UpdateGame`)
 
 ```
-GS_FIELD(0)     walk; A+facing NPC → OPENING; Select or step_count≥16 → EnterBattle
-GS_OPENING(1)   wipe text window in  (DrawStep, mode=open,  9 chunks)  → DIALOG
-GS_DIALOG(2)    window up; A → CLOSING
-GS_CLOSING(3)   restore field under window (DrawStep, mode=close)       → FIELD
-GS_BATTLE(4)    enemy shown; A → ENEMYDIE
-GS_ENEMYDIE(5)  EraseEnemyRow, one tile-row/frame (4 frames)            → BATTLEWAIT
+GS_FIELD(0)      walk; A+facing NPC → OPENING (field msg); Select/steps → EnterBattle
+GS_OPENING(1)    open the box (DrawStep, mode=open, 9 chunks)            → GS_TEXT
+GS_DIALOG(2)     field message fully shown; A → CLOSING
+GS_CLOSING(3)    restore field under the box (DrawStep, mode=close)      → FIELD
+GS_ENEMYDIE(5)   EraseEnemyRow, one tile-row/frame (4 frames)           → BATTLEWAIT
 GS_BATTLEWAIT(6) battle_timer countdown → ExitBattle                    → FIELD
+GS_TEXT(7)       render message lines (RenderLine); ends per msg_context
+GS_TEXTWAIT(8)   page full ("▼" prompt), A → next page
+GS_BWAIT(9)      battle message shown; A advances combat (battle_phase)
 ```
 
-`GS_TEXT`/`GS_TEXTWAIT` render message text into the open box (below). States ≥
-`GS_BATTLE` hide the hero (`HideHero`); others draw it (`BuildOAM`).
+`msg_context` (FIELD/BATTLE) decides where `GS_TEXT` goes when a message ends:
+FIELD→`GS_DIALOG`, BATTLE→`GS_BWAIT`. The hero is hidden whenever `in_battle` is
+set (the whole battle screen), drawn otherwise (field, including dialogue).
+
+### Battle flow
+
+`EnterBattle` cuts to the black arena (`DrawBattle` draws the enemy), sets
+`enemy_hp`, then opens the box and shows `MSG_SLIME_APPEARS`. `GS_BWAIT` drives
+combat by `battle_phase`: each A runs `DoAttack` (damage 4-7 capped to HP,
+`ComposeDamage` builds "The Slime takes N damage!" in `msg_buf`) and re-renders;
+at 0 HP it shows `MSG_SLIME_DEFEATED`, then erases the enemy and `ExitBattle`
+returns to the field at the prior spot.
 
 -----
 
@@ -132,8 +144,8 @@ frame + blank interior), then `GS_TEXT` calls `RenderLine` once per frame —
 each builds a 30-tile VRAM packet for interior line `cur_line` (nametable row
 `22+L`) and reads `term_action` from the ending control. On a page break it
 shows the `▼` prompt (`DrawPrompt`) and waits for A in `GS_TEXTWAIT`; on end it
-waits for A then closes. Dynamic text (battle numbers) will compose a one-line
-stream in RAM and reuse `RenderLine`.
+waits for A then closes. Dynamic text (e.g. damage) is composed into `msg_buf`
+in RAM (`CopyFrag` + `AppendNumber` → `DIGIT_TILE`) and rendered the same way.
 
 -----
 

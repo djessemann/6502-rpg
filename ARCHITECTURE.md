@@ -18,7 +18,8 @@ Build: `make` → `6502rpg.nes` (NROM, 32KB PRG + 8KB CHR). Art: regenerate with
 | `src/main.s`          | Everything: boot, main loop, NMI, state machine, routines, palettes, tables. |
 | `src/chr.s`           | **Generated.** CHR-ROM tile data (BG table 0, hero table 1). |
 | `src/field.s`         | **Generated.** `fieldmap`, `fieldattr`, `winmap` (exported).  |
-| `src/tiles.inc`       | **Generated.** Tile-index constants (`HERO_*_TILE`, `TILE_NPC_LO/HI`, `ENEMY_TILE_BASE`). |
+| `src/tiles.inc`       | **Generated.** Tile/geometry constants and message ids (`HERO_*_TILE`, `ENEMY_TILE_BASE`, `WIN_STEPS`, `MSG_*`). |
+| `src/messages.s`      | **Generated.** `msg_table` + wrapped/paginated message byte streams. |
 | `tools/gen_assets.py` | Dev-time art source-of-truth → emits `chr.s` + `field.s`. Not in the `make` path. |
 | `nes.cfg`             | ld65 config (RAM/PRG/CHR layout, segments).                   |
 
@@ -114,9 +115,25 @@ GS_ENEMYDIE(5)  EraseEnemyRow, one tile-row/frame (4 frames)            → BATT
 GS_BATTLEWAIT(6) battle_timer countdown → ExitBattle                    → FIELD
 ```
 
-States ≥ `GS_BATTLE` hide the hero (`HideHero`); others draw it (`BuildOAM`).
-Window draw is table-driven (`step_hi/lo/cnt`, `open_src`/`close_src`); the enemy
-erase uses `enemy_lo`/`enemy_nt`.
+`GS_TEXT`/`GS_TEXTWAIT` render message text into the open box (below). States ≥
+`GS_BATTLE` hide the hero (`HideHero`); others draw it (`BuildOAM`).
+
+-----
+
+## Text engine
+
+Messages are authored as plain strings in `gen_assets.py`; the tool word-wraps
+to the 30-col interior and paginates to 4 lines, emitting a byte stream into
+`messages.s`: tile bytes (glyph, or `$00` for space) plus control codes
+`$FE` newline, `$FD` page break, `$FF` end. `msg_table` indexes them by `MSG_*`.
+
+Runtime: `SetMessage(id)` points `msg_ptr` at a stream; the box opens (shell =
+frame + blank interior), then `GS_TEXT` calls `RenderLine` once per frame —
+each builds a 30-tile VRAM packet for interior line `cur_line` (nametable row
+`22+L`) and reads `term_action` from the ending control. On a page break it
+shows the `▼` prompt (`DrawPrompt`) and waits for A in `GS_TEXTWAIT`; on end it
+waits for A then closes. Dynamic text (battle numbers) will compose a one-line
+stream in RAM and reuse `RenderLine`.
 
 -----
 

@@ -3,7 +3,7 @@
 NAME    := 6502rpg
 CFG     := nes.cfg
 SRCDIR  := src
-SRCS    := $(SRCDIR)/header.s $(SRCDIR)/main.s $(SRCDIR)/field.s $(SRCDIR)/chr.s
+SRCS    := $(SRCDIR)/header.s $(SRCDIR)/main.s $(SRCDIR)/field.s $(SRCDIR)/chr.s $(SRCDIR)/messages.s
 OBJS    := $(SRCS:.s=.o)
 
 AS      := ca65

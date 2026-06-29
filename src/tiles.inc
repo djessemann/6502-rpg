@@ -8,7 +8,16 @@ HERO_SIDE_TILE = $08
 ; Background tiles (pattern table 0).
 TILE_NPC_LO = $08   ; first NPC tile (all facings)
 TILE_NPC_HI = $17   ; last NPC tile (solid range)
-ENEMY_TILE_BASE = $5C
+ENEMY_TILE_BASE = $5D
+ARROW_TILE = $21   ; 'more text' prompt
+WIN_BOTTOM_TILE = $1F   ; bottom-border tile (restores under the prompt)
 
 ; Text window: full-width box at nametable rows 20-27.
 WIN_STEPS = 9
+TEXT_COLS = 30
+TEXT_LINES = 4
+; Message control codes and ids.
+MSG_NEWLINE = $FE
+MSG_PAGE    = $FD
+MSG_END     = $FF
+MSG_NPC_GREETING = 0

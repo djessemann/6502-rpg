@@ -13,7 +13,7 @@
 .include "nes.inc"
 .include "tiles.inc"   ; generated tile-index constants (gen_assets.py)
 
-.import fieldmap, fieldattr, winmap
+.import fieldmap, fieldattr, winmap, msg_table
 
 ; ----------------------------------------------------------------------------
 ; Constants
@@ -36,6 +36,8 @@ GS_CLOSING = 3          ; wiping the text window out
 GS_BATTLE  = 4          ; battle: enemy shown, waiting for an attack
 GS_ENEMYDIE = 5         ; erasing the enemy tiles (one row per frame)
 GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
+GS_TEXT    = 7          ; rendering message lines into the open box
+GS_TEXTWAIT = 8         ; page full ("more" prompt shown), waiting for A
 
 ; WIN_STEPS comes from tiles.inc (window draw chunks). Window is a full-width
 ; box at nametable rows 20-27; nametable base of row 20 = $2000 + 20*32 = $2280.
@@ -109,6 +111,12 @@ oamoff:       .res 1   ; current OAM slot offset (slot * 4)
 
 woff:         .res 1   ; window draw: chunk index (k)
 woff2:        .res 1   ; window draw: byte offset (k * 64)
+
+; text engine
+msg_ptr:      .res 2   ; pointer into the current message byte stream
+cur_line:     .res 1   ; interior line being rendered (0..TEXT_LINES-1)
+term_action:  .res 1   ; how the last line ended: 0=newline 1=page 2=end
+aux_flag:     .res 1   ; one-shot latch (e.g. "prompt drawn")
 
 ; ----------------------------------------------------------------------------
 ; Shadow OAM (DMA source page, $0200-$02FF)
@@ -660,6 +668,12 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
 :   cmp #GS_BATTLEWAIT
     bne :+
     jmp @battlewait
+:   cmp #GS_TEXT
+    bne :+
+    jmp @text
+:   cmp #GS_TEXTWAIT
+    bne :+
+    jmp @textwait
 :
 
     ; --- GS_FIELD ---
@@ -685,6 +699,8 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     beq @ret
     jsr FacingNPC       ; carry set if adjacent to and facing the NPC
     bcc @ret
+    lda #MSG_NPC_GREETING
+    jsr SetMessage
     lda #0
     sta job_step
     lda #GS_OPENING
@@ -736,20 +752,59 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     lda job_step
     cmp #WIN_STEPS
     bcc @ret2
-    lda #GS_DIALOG
+    lda #0              ; box is open: start rendering text
+    sta cur_line
+    lda #GS_TEXT
     sta gamestate
 @ret2:
+    rts
+
+@text:
+    jsr RenderLine      ; one interior line into the VRAM buffer this frame
+    inc cur_line
+    lda term_action
+    beq @ret3           ; 0 = newline: keep rendering
+    cmp #1
+    bne @text_end       ; 2 = end of message
+    lda #0              ; 1 = page break: show the prompt and wait
+    sta aux_flag
+    lda #GS_TEXTWAIT
+    sta gamestate
+    rts
+@text_end:
+    lda #GS_DIALOG
+    sta gamestate
+@ret3:
+    rts
+
+@textwait:
+    lda aux_flag        ; draw the "more" prompt once, then poll A
+    bne @tw_poll
+    jsr DrawPrompt
+    lda #1
+    sta aux_flag
+    rts
+@tw_poll:
+    lda pad1_new
+    and #BTN_A
+    beq @ret5
+    jsr ErasePrompt
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+@ret5:
     rts
 
 @dialog:
     lda pad1_new
     and #BTN_A
-    beq @ret3
+    beq @ret4
     lda #0
     sta job_step
     lda #GS_CLOSING
     sta gamestate
-@ret3:
+@ret4:
     rts
 
 @closing:
@@ -759,10 +814,113 @@ ent_timer: .res MAX_ENT   ; pixels remaining in the current slide
     inc job_step
     lda job_step
     cmp #WIN_STEPS
-    bcc @ret4
+    bcc @ret6
     lda #GS_FIELD
     sta gamestate
-@ret4:
+@ret6:
+    rts
+.endproc
+
+; SetMessage — point msg_ptr at message id A (index into msg_table).
+.proc SetMessage
+    asl a
+    tay
+    lda msg_table,y
+    sta msg_ptr
+    lda msg_table+1,y
+    sta msg_ptr+1
+    rts
+.endproc
+
+; RenderLine — render one interior line (cur_line) of the current message into
+; the VRAM buffer, padding to TEXT_COLS. Sets term_action from the control code
+; that ended the line: 0 = newline, 1 = page break, 2 = end of message.
+; Interior line L is nametable row 22+L, cols 1-30 -> address $22C1 + L*32.
+.proc RenderLine
+    lda cur_line
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc #$C1
+    sta vpkt_lo
+    lda #$22
+    adc #0
+    sta VBUF
+    lda #TEXT_COLS
+    sta vpkt_cnt
+
+    ldx #0              ; column / VBUF data index
+    ldy #0
+@read:
+    lda (msg_ptr),y
+    inc msg_ptr
+    bne :+
+    inc msg_ptr+1
+:
+    cmp #MSG_NEWLINE
+    beq @nl
+    cmp #MSG_PAGE
+    beq @page
+    cmp #MSG_END
+    beq @end
+    cpx #TEXT_COLS      ; overflow safety: discard but keep consuming
+    bcs @read
+    sta VBUF+3,x
+    inx
+    jmp @read
+@nl:
+    lda #0
+    sta term_action
+    jmp @pad
+@page:
+    lda #1
+    sta term_action
+    jmp @pad
+@end:
+    lda #2
+    sta term_action
+@pad:
+    lda #$00
+@padloop:
+    cpx #TEXT_COLS
+    bcs @done
+    sta VBUF+3,x
+    inx
+    jmp @padloop
+@done:
+    lda vpkt_lo
+    sta VBUF+1
+    lda vpkt_cnt
+    sta VBUF+2
+    rts
+.endproc
+
+; DrawPrompt / ErasePrompt — the "more text" triangle on the bottom border,
+; centered at nametable $236F (row 27, col 15).
+.proc DrawPrompt
+    lda #$23
+    sta VBUF
+    lda #$6F
+    sta VBUF+1
+    lda #1
+    sta VBUF+2
+    lda #ARROW_TILE
+    sta VBUF+3
+    rts
+.endproc
+
+.proc ErasePrompt
+    lda #$23
+    sta VBUF
+    lda #$6F
+    sta VBUF+1
+    lda #1
+    sta VBUF+2
+    lda #WIN_BOTTOM_TILE
+    sta VBUF+3
     rts
 .endproc
 

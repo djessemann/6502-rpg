@@ -204,8 +204,12 @@ NPC_FACING = "down"
 # color1 = white ($30). So glyphs/frame are '#' = white ink (value 1) on
 # '.' = black (value 0). 5x7 cell, baseline on row 6, descenders on row 7.
 # ---------------------------------------------------------------------------
+ARROW = "\x1f"   # the "more text" prompt glyph (down triangle)
+
 FONT = {
     " ": ["........"] * 8,
+    ARROW: ["........", "........", "#######.", ".#####..",
+            "..###...", "...#....", "........", "........"],
     # lowercase
     "a": ["........", "........", ".###....", "....#...", ".####...", "#...#...", ".####...", "........"],
     "b": ["#.......", "#.......", "#.##....", "##..#...", "#...#...", "#...#...", "##.#....", "........"],
@@ -269,13 +273,22 @@ FONT = {
     "-": ["........", "........", "........", ".###....", "........", "........", "........", "........"],
 }
 
-# Sample shown until the runtime text engine lands (next step). Up to 4 lines
-# of <= 28 chars, matching the large bottom box interior.
-SAMPLE_LINES = [
-    "Erdrick, listen now to",
-    "my words. In ages past,",
-    "a hero sealed the demon",
-    "with a Ball of Light.",
+# ---------------------------------------------------------------------------
+# Messages. Authored as plain strings; the tool word-wraps to the interior
+# width and paginates to 4 lines, emitting a byte stream the runtime renders:
+#   tile bytes (glyph or $00 space) ... per line, with control codes
+#   $FE = newline, $FD = page break (wait for A), $FF = end of message.
+# Pages are padded to exactly 4 lines so a new page fully overwrites the last.
+# ---------------------------------------------------------------------------
+MSG_NEWLINE, MSG_PAGE, MSG_END = 0xFE, 0xFD, 0xFF
+TEXT_W, TEXT_H = 30, 4   # interior width / lines per page
+
+MESSAGES = [
+    # name, text
+    ("NPC_GREETING",
+     "Erdrick, listen now to my words. In ages past, a hero "
+     "sealed the demon with a Ball of Light. Seek it, brave "
+     "one, and face the darkness that wakes once more."),
 ]
 
 # ---------------------------------------------------------------------------
@@ -426,6 +439,41 @@ def glyph(ch):
     return to_digits(art)
 
 
+def wrap_text(text, width):
+    """Greedy word-wrap into a list of lines no wider than `width`."""
+    lines, cur = [], ""
+    for word in text.split():
+        assert len(word) <= width, f"word too long: {word!r}"
+        if not cur:
+            cur = word
+        elif len(cur) + 1 + len(word) <= width:
+            cur += " " + word
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def encode_message(text, font_id):
+    """Wrap + paginate `text` into the runtime byte stream (see MESSAGES)."""
+    lines = wrap_text(text, TEXT_W)
+    out = []
+    for p in range(0, max(len(lines), 1), TEXT_H):
+        page = lines[p:p + TEXT_H]
+        page += [""] * (TEXT_H - len(page))         # pad to 4 lines
+        last_page = p + TEXT_H >= len(lines)
+        for i, line in enumerate(page):
+            for ch in line:
+                out.append(0x00 if ch == " " else font_id[ch])
+            if i < TEXT_H - 1:
+                out.append(MSG_NEWLINE)
+            else:
+                out.append(MSG_END if last_page else MSG_PAGE)
+    return out
+
+
 def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = os.path.join(here, "src")
@@ -554,26 +602,15 @@ def main():
     flat = [m[y][x] for y in range(H) for x in range(W)]
     attr = attr_table(m)
 
-    # --- build the large bottom window tilemap: 32 wide x 8 tall ---
-    # Full screen width (so the palette-3 attribute band aligns cleanly), with a
-    # 1-tile black margin (W_FILL) inside the edges, the double-line frame, and
-    # a 28x5 text interior. Drawn at nametable rows 20-27.
-    # The frame sits at the very edge of the box (no black margin outside it),
-    # so the field shows right up against the border. Interior is 30 wide x 4
-    # text lines, with one blank padding row above and below the text.
-    IN_W, IN_H = 30, 4
-    lines = (list(SAMPLE_LINES) + [""] * IN_H)[:IN_H]
-
-    def interior_row(s):
-        cells = [W_FILL if c == " " else font_id[c] for c in s[:IN_W]]
-        cells += [W_FILL] * (IN_W - len(cells))
-        return [W_L] + cells + [W_R]
-
+    # --- build the window SHELL: frame + blank interior, 32 wide x 8 tall ---
+    # Full-width box at nametable rows 20-27 (so the palette-3 band aligns), with
+    # the frame at the very edge. The runtime renders text into the blank
+    # interior (rows 22-25), so no text is baked here.
+    IN_W = 30
     pad_row = [W_L] + [W_FILL] * IN_W + [W_R]
     winmap = [W_TL] + [W_T] * IN_W + [W_TR]     # row 0: top border
     winmap += pad_row                            # row 1: top padding
-    for r in range(IN_H):                        # rows 2-5: 4 text lines
-        winmap += interior_row(lines[r])
+    winmap += pad_row * 4                         # rows 2-5: 4 blank text lines
     winmap += pad_row                            # row 6: bottom padding
     winmap += [W_BL] + [W_B] * IN_W + [W_BR]     # row 7: bottom border
 
@@ -584,12 +621,30 @@ def main():
 
     with open(os.path.join(src, "field.s"), "w") as f:
         f.write("; field.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
-        f.write("; One-screen field map + attribute table, and the text window tilemap.\n\n")
+        f.write("; One-screen field map + attribute table, and the window shell.\n\n")
         f.write(".export fieldmap, fieldattr, winmap\n\n")
         f.write('.segment "RODATA"\n')
         f.write(fmt_bytes("fieldmap", flat, 32) + "\n\n")
         f.write(fmt_bytes("fieldattr", attr, 16) + "\n\n")
         f.write(fmt_bytes("winmap", winmap, 32) + "\n")
+
+    # --- messages ---
+    encoded = [(name, encode_message(text, font_id)) for name, text in MESSAGES]
+    with open(os.path.join(src, "messages.s"), "w") as f:
+        f.write("; messages.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
+        f.write("; msg_table: word pointers indexed by MSG_* (see tiles.inc).\n\n")
+        f.write(".export msg_table\n\n")
+        f.write('.segment "RODATA"\n')
+        f.write("msg_table:\n")
+        for name, _ in encoded:
+            f.write(f"    .word msg_{name}\n")
+        f.write("\n")
+        for name, data in encoded:
+            f.write(f"msg_{name}:\n")
+            for i in range(0, len(data), 16):
+                row = ", ".join(f"${b:02X}" for b in data[i:i + 16])
+                f.write(f"    .byte {row}\n")
+            f.write("\n")
 
     # tile-index constants consumed by main.s (so nothing is hardcoded there)
     with open(os.path.join(src, "tiles.inc"), "w") as f:
@@ -601,9 +656,19 @@ def main():
         f.write("; Background tiles (pattern table 0).\n")
         f.write(f"TILE_NPC_LO = ${NPC_DOWN:02X}   ; first NPC tile (all facings)\n")
         f.write(f"TILE_NPC_HI = ${NPC_RIGHT + 3:02X}   ; last NPC tile (solid range)\n")
-        f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n\n")
+        f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
+        f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")
+        f.write(f"WIN_BOTTOM_TILE = ${W_B:02X}   ; bottom-border tile (restores under the prompt)\n\n")
         f.write("; Text window: full-width box at nametable rows 20-27.\n")
         f.write(f"WIN_STEPS = {win_steps}\n")
+        f.write(f"TEXT_COLS = {TEXT_W}\n")
+        f.write(f"TEXT_LINES = {TEXT_H}\n")
+        f.write("; Message control codes and ids.\n")
+        f.write(f"MSG_NEWLINE = ${MSG_NEWLINE:02X}\n")
+        f.write(f"MSG_PAGE    = ${MSG_PAGE:02X}\n")
+        f.write(f"MSG_END     = ${MSG_END:02X}\n")
+        for i, (name, _) in enumerate(MESSAGES):
+            f.write(f"MSG_{name} = {i}\n")
 
     # console preview
     glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "T",

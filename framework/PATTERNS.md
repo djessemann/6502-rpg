@@ -63,6 +63,19 @@ rendering and NMI disabled, hold scroll at (0,0) while it's up, and on exit
 repaint the field for the current camera before re-enabling. A brief cut-to-black
 on a scene change is acceptable; a black flash on a *menu* is not.
 
+## Data formats (engine phase)
+Past the slice, content must be *data the ROM reads*, not hand-written code. For
+each kind of content — map, tileset/CHR bank, entity/NPC, encounter, text, stats
+— define a compact binary format, write the generator **emitter** (authoring →
+bytes) and the runtime **reader** (bytes → behavior), prove it on the smallest
+real example, then **freeze it** before authoring at volume. *Invariant: decide
+the format first; changing it after content exists is rework across all content.*
+Banking note: with CHR-ROM bank-switching, "show a new tileset" = point at a
+different bank (no copy); with CHR-RAM, stream tiles in within the vblank budget.
+
 ## Save model
 Decide before the engine phase: password vs battery SRAM. Battery ⇒ a mapper with
-battery-backed RAM (MMC1/MMC3). This drives mapper choice.
+battery-backed RAM (MMC1/MMC3) and a "battery" flag in the ROM header; emulators
+persist it as a save file. This drives mapper choice. (MMC3 = mapper 4: fast CHR
+bank-switching + a scanline IRQ for a fixed HUD; MMC1 = simpler, classic, pairs
+with editable CHR-RAM.)

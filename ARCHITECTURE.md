@@ -290,9 +290,18 @@ All content flows through `tools/gen_assets.py`; never hand-edit `src/*.s` /
 
 ## Where the engine phase plugs in (not built yet — see CLAUDE.md order)
 
-- CHR-RAM streaming replaces the fixed CHR-ROM (`chr.s`); tile indices become
-  per-tileset, font/UI stay resident.
-- UxROM banking: PRG split; the split loop, VBUF, and state machine are unchanged.
-- Real data formats replace the hardcoded NPC line, `winmap`, and enemy.
-- A real battle system replaces `GS_BATTLE`/`ENEMYDIE`/`BATTLEWAIT`.
-- Save model (password vs battery) — decide before the engine phase.
+Target: **MMC3 (mapper 4) + battery SRAM**. The split loop, VBUF, scrolling,
+streaming, in-place boxes, and state machine carry over unchanged — they were
+built mapper-independent. The engine phase adds, **format-first** (define +
+freeze each data format with its generator emitter and runtime reader before
+content):
+
+- **PRG/CHR banking (MMC3).** Many tilesets/characters live in CHR-ROM banks,
+  bank-switched per area/scene; font/UI tiles stay resident. Replaces the single
+  fixed `chr.s`; tile indices become per-tileset.
+- **Map format.** A compiled map (tilemap + collision + metadata) the ROM reads,
+  replacing the hand-built `world[][]` in `gen_assets.py`. *Do this first.*
+- **Entity / NPC / encounter formats.** Replace the hardcoded NPC and enemy.
+- **Stats + a real battle system**, replacing `GS_BATTLE`/`ENEMYDIE`/`BATTLEWAIT`.
+- **Save system** (battery SRAM): Save/Continue; `.sav` in emulators.
+- Optional MMC3 scanline IRQ for a fixed HUD over the scrolling field (opt-in).

@@ -51,9 +51,13 @@ cleanly is success. Anything beyond them is scope creep, even if it’s easy.
 
 1. **Slice (NOW)** — NROM. Prove the bones feel right and a clean `.nes` builds.
    Scope = SLICE.md.
-1. **Engine (later)** — migrate to UxROM + CHR-RAM; add banking, CHR-RAM
-   streaming, and the real data-format interpreters. Decide the save model first.
-1. **Content (later)** — pour in tilesets, monsters, and text via the formats.
+1. **Engine (later)** — migrate to MMC3 + battery; add PRG banking, CHR
+   bank-switching, and the real data-format interpreters. **Format-first:** define
+   and freeze each on-ROM data format (map, tileset, entity, encounter, text,
+   stats) — with its generator emitter and its runtime reader — before pouring
+   content. (Save model decided: battery.)
+1. **Content (later)** — pour in tilesets, monsters, maps, and text via the
+   frozen formats.
 
 Do not touch phase 2 or 3 work — not even scaffolding for it — until I say the
 slice is verified and we’re moving on.
@@ -65,22 +69,30 @@ exactly, pausing after each for verification.
 
 ## Current phase
 
-**Vertical slice** (see SLICE.md). Building one screen + hero + one NPC + one
-stub encounter to prove the bones feel right and that a clean `.nes` builds on
-this toolchain. Not the real engine yet.
+**Slice: complete and verified.** Beyond the original slice (SLICE.md) we also
+built — at my direction — a 2×2 scrolling overworld with row streaming and
+in-place text/menu/dialogue boxes drawn over the map. See ARCHITECTURE.md.
+
+**Next: Engine phase** (format-first; target MMC3 + battery), starting with the
+map data format. Not started yet — the world bible and reference assets are being
+authored first.
 
 -----
 
 ## Mapper
 
 - **Slice phase: NROM (mapper 0)** — 32KB PRG, 8KB CHR-ROM. Simplest path.
-- **Save model: battery SRAM** (decided). Needs a battery-capable mapper.
-- **Target (engine phase): MMC1 or MMC3** — battery save + PRG banking + CHR
-  banking/streaming for visual variety. Finalize MMC1-vs-MMC3 at the start of the
-  engine phase (MMC1: CHR-RAM streaming, simple, classic RPG choice; MMC3: CHR-ROM
-  bank switching + scanline IRQ, finer tile swaps + easy split status bar).
-- The structural rules below are **mapper-independent** and must hold on both.
-  Banking and CHR streaming are added at the engine phase, not now.
+- **Save model: battery SRAM** (decided).
+- **Target (engine phase): MMC3 / mapper 4** (decided) — battery save, PRG
+  banking, and fine/fast CHR-ROM bank-switching for the visual-variety hook, plus
+  a scanline IRQ available for a fixed HUD over the scrolling field. Implemented
+  at the engine phase, not now (only the features we use; the IRQ split is opt-in).
+- **Output is a `.nes` ROM run in emulators** (FCEUX/Mesen/web) — no physical
+  cartridge. MMC3 and battery save (persisted as a `.sav` file) are fully
+  emulated; our headless test emulator supports mapper 4, so the verify loop
+  carries into the engine phase unchanged.
+- The structural rules below are **mapper-independent** and hold on NROM and MMC3
+  alike. Banking and CHR bank-switching are added at the engine phase, not now.
 
 -----
 

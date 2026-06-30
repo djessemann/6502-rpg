@@ -25,6 +25,7 @@ are always in context — e.g. a line `@framework/HARDWARE.md` and
 | `METHOD.md`       | How to work: build order, scope, verify loop, toolchain | rarely |
 | `HARDWARE.md`     | NES/6502 contract + traps. **Binding.** Mapper-independent | rarely |
 | `PATTERNS.md`     | Reusable engine recipes (how to build each subsystem) | as patterns are added |
+| `ASSETS.md`       | For artists/writers: NES art limits + how to author content | rarely |
 | `PROJECT.md`      | *This game's* choices + current scope | per phase |
 | `ARCHITECTURE.md` | How *this* engine actually works now (code map) | when a subsystem changes |
 

@@ -1,5 +1,13 @@
 # SLICE.md — Vertical Slice Spec
 
+> **Status: COMPLETE and verified.** All six build steps below shipped and were
+> verified headless. Beyond this spec we then built — by explicit direction — a
+> 2×2 scrolling overworld (row streaming) and in-place text/menu/dialogue boxes
+> drawn over the map; those are documented in ARCHITECTURE.md. **Next phase:
+> Engine** (format-first; MMC3 + battery), starting with the map data format —
+> see CLAUDE.md → Order of operations. This file is kept as the slice record /
+> reference; the engine phase will get its own scope doc.
+
 > **Scope rule for the agent:** this file is the entire job right now. Build the
 > MVP interactions below **in the numbered order, one at a time**, stopping after
 > each for verification. Do **not** suggest, offer, or begin anything outside

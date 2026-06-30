@@ -4,9 +4,14 @@
 1. **Slice.** Simplest mapper (NROM). One screen, one hero, one NPC, one stub
    encounter. Prove the bones feel right and a clean `.nes` builds on the
    toolchain. This is throwaway-grade, but it must obey `HARDWARE.md`.
-2. **Engine.** Migrate to the target mapper (PRG banking + CHR streaming if
-   needed); add the real data-format interpreters. Decide the save model first.
-3. **Content.** Pour in tilesets, monsters, maps, and text through the formats.
+2. **Engine.** Decide the save model (it gates the mapper), then migrate to the
+   target mapper (PRG banking + CHR bank-switching/streaming). **Format-first:**
+   define and *freeze* each on-ROM data format — map, tileset, entity, encounter,
+   text, stats — with its generator emitter and its runtime reader, proven on the
+   smallest real content, before any of it is mass-authored. Changing a format
+   after content exists is the expensive mistake this order avoids.
+3. **Content.** Pour in tilesets, monsters, maps, and text through the frozen
+   formats. (Authoring assets can start during phase 2 — see `ASSETS.md`.)
 
 Do not start a later phase — not even scaffolding — until the current one is
 verified.
@@ -25,6 +30,11 @@ verified.
   script the controller, capture frames, diff them. Confirm the step
   pixel-for-pixel before handing the ROM over — e.g. "field after closing the
   menu == the frame before opening it." This catches glitches a glance misses.
+  (Check the headless emulator supports your target mapper before relying on it.)
+- **Grow a regression suite.** As features/content accumulate, promote those
+  one-off headless checks into a committed `tests/` of scripted scenarios +
+  golden frames, run each milestone. It's the cheapest insurance against a
+  growing ROM silently regressing.
 
 ## Toolchain
 - Assembler/linker: **ca65 / ld65** (cc65 suite), Makefile-driven. The build is

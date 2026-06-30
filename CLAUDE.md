@@ -5,18 +5,21 @@ personality** — many characters, tilesets, and background-rendered enemies. Th
 art ambition is the spec; the mechanics are deliberately minimal.
 
 This file is the binding contract. Follow it in every session and every file.
-For the current task scope, see **SLICE.md**.
+The active phase and its scope live in the **Current phase** section below.
 
 ## Documentation map
 - **CLAUDE.md** (this file) — binding contract for *this* project: scope
-  discipline, the active phase, this game's choices, the hardware rules.
+  discipline, the active phase + scope, this game's choices, the hardware rules.
 - **framework/** — the portable, project-agnostic distillation (method,
   hardware contract, engine patterns, a `PROJECT` template). Canonical and
   shareable; copy it to bootstrap a new NES RPG. The rules here mirror
   `framework/HARDWARE.md`.
 - **ARCHITECTURE.md** — how *this* engine works now (code map) + how to add
   content. Read before changing a subsystem.
-- **SLICE.md** — the current build scope.
+
+(The slice phase is complete; its old `SLICE.md` spec is retired — its current
+truth lives in ARCHITECTURE.md. Each new phase states its scope under **Current
+phase**, or in its own phase doc when one is warranted.)
 
 Doc rule: state the current truth (not history); one fact in one place; name
 the function instead of duplicating its code; update docs in the commit that
@@ -40,8 +43,9 @@ step at a time**, and stop for me to verify before the next step.
 - If a request seems to need out-of-scope work, **stop and ask** rather than
   expanding scope on your own.
 
-The MVP interactions in SLICE.md are the entire job right now. Finishing them
-cleanly is success. Anything beyond them is scope creep, even if it’s easy.
+The scope of the **active phase** (see **Current phase**) is the entire job.
+Finishing it cleanly is success; anything beyond it is scope creep, even if easy.
+When no phase is active (between phases), do nothing in-engine without a scope.
 
 -----
 
@@ -49,9 +53,9 @@ cleanly is success. Anything beyond them is scope creep, even if it’s easy.
 
 **Macro (phases — do not skip ahead):**
 
-1. **Slice (NOW)** — NROM. Prove the bones feel right and a clean `.nes` builds.
-   Scope = SLICE.md.
-1. **Engine (later)** — migrate to MMC3 + battery; add PRG banking, CHR
+1. **Slice (DONE)** — NROM. Proved the bones feel right and a clean `.nes`
+   builds. Complete and verified (see **Current phase** / ARCHITECTURE.md).
+1. **Engine (NOW / next)** — migrate to MMC3 + battery; add PRG banking, CHR
    bank-switching, and the real data-format interpreters. **Format-first:** define
    and freeze each on-ROM data format (map, tileset, entity, encounter, text,
    stats) — with its generator emitter and its runtime reader — before pouring
@@ -59,19 +63,19 @@ cleanly is success. Anything beyond them is scope creep, even if it’s easy.
 1. **Content (later)** — pour in tilesets, monsters, maps, and text via the
    frozen formats.
 
-Do not touch phase 2 or 3 work — not even scaffolding for it — until I say the
-slice is verified and we’re moving on.
+Do not pull a later phase's work forward — not even scaffolding — until I say
+the current phase is verified and we're moving on.
 
-**Micro (within the slice):** follow the numbered build order in SLICE.md
-exactly, pausing after each for verification.
+**Micro (within a phase):** follow that phase's numbered build order exactly,
+one step → one runnable `.nes` → I verify → next.
 
 -----
 
 ## Current phase
 
-**Slice: complete and verified.** Beyond the original slice (SLICE.md) we also
-built — at my direction — a 2×2 scrolling overworld with row streaming and
-in-place text/menu/dialogue boxes drawn over the map. See ARCHITECTURE.md.
+**Slice: complete and verified.** Beyond the original slice we also built — at my
+direction — a 2×2 scrolling overworld with row streaming and in-place
+text/menu/dialogue boxes drawn over the map. See ARCHITECTURE.md.
 
 **Next: Engine phase** (format-first; target MMC3 + battery), starting with the
 map data format. Not started yet — the world bible and reference assets are being

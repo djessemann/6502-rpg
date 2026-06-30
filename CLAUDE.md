@@ -74,12 +74,13 @@ this toolchain. Not the real engine yet.
 ## Mapper
 
 - **Slice phase: NROM (mapper 0)** — 32KB PRG, 8KB CHR-ROM. Simplest path.
-- **Target (later): UxROM + CHR-RAM** — PRG banking + tiles streamed from PRG
-  into CHR-RAM for visual variety.
+- **Save model: battery SRAM** (decided). Needs a battery-capable mapper.
+- **Target (engine phase): MMC1 or MMC3** — battery save + PRG banking + CHR
+  banking/streaming for visual variety. Finalize MMC1-vs-MMC3 at the start of the
+  engine phase (MMC1: CHR-RAM streaming, simple, classic RPG choice; MMC3: CHR-ROM
+  bank switching + scanline IRQ, finer tile swaps + easy split status bar).
 - The structural rules below are **mapper-independent** and must hold on both.
-  Banking and CHR-RAM streaming are added at the engine phase, not now.
-- Save model (decide before the engine phase): [ password | battery SRAM ].
-  Battery ⇒ migrate to MMC1/MMC3.
+  Banking and CHR streaming are added at the engine phase, not now.
 
 -----
 

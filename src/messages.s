@@ -2,7 +2,7 @@
 ; msg_table: word pointers indexed by MSG_* (see tiles.inc).
 ; frag_*: $FF-terminated tile streams for runtime composition.
 
-.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
+.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP, frag_OPT_FIGHT, frag_OPT_RUN, frag_EATK_PRE, frag_EATK_POST
 
 .segment "RODATA"
 msg_table:
@@ -10,6 +10,8 @@ msg_table:
     .word msg_SLIME_APPEARS
     .word msg_SLIME_DEFEATED
     .word msg_NOBODY
+    .word msg_FLEE
+    .word msg_DEAD
 
 msg_NPC_GREETING:
     .byte $45, $60, $00, $70, $66, $6C, $2D, $FE, $FE, $FE, $FD, $54, $5C, $63, $5A, $66
@@ -27,6 +29,14 @@ msg_SLIME_DEFEATED:
 msg_NOBODY:
     .byte $51, $5F, $5C, $69, $5C, $00, $60, $6A, $00, $65, $66, $00, $66, $65, $5C, $00
     .byte $6B, $5F, $5C, $69, $5C, $31, $FE, $FE, $FE, $FF
+
+msg_FLEE:
+    .byte $51, $5F, $66, $6C, $00, $5F, $58, $6A, $6B, $00, $5D, $63, $5C, $5B, $31, $FE
+    .byte $FE, $FE, $FF
+
+msg_DEAD:
+    .byte $51, $5F, $66, $6C, $00, $58, $69, $6B, $00, $5B, $5C, $5D, $5C, $58, $6B, $5C
+    .byte $5B, $31, $31, $31, $FE, $FE, $FE, $FF
 
 frag_DMG_PRE:
     .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $6B, $58, $62, $5C, $6A, $00
@@ -55,4 +65,17 @@ frag_LBL_POWER:
 
 frag_LBL_HP:
     .byte $45, $4D, $FF
+
+frag_OPT_FIGHT:
+    .byte $43, $60, $5E, $5F, $6B, $FF
+
+frag_OPT_RUN:
+    .byte $4F, $6C, $65, $FF
+
+frag_EATK_PRE:
+    .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $5F, $60, $6B, $6A, $00, $6B
+    .byte $5F, $5C, $5C, $00, $5D, $66, $69, $00, $FF
+
+frag_EATK_POST:
+    .byte $2D, $FF
 

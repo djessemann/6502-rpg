@@ -478,6 +478,8 @@ MESSAGES = [
     ("SLIME_APPEARS", "A Slime draws near!"),
     ("SLIME_DEFEATED", "The Slime is defeated!"),
     ("NOBODY", "There is no one there."),
+    ("FLEE", "Thou hast fled."),
+    ("DEAD", "Thou art defeated..."),
 ]
 
 # Fragments composed with a runtime number into a one-line battle message:
@@ -494,6 +496,11 @@ FRAGMENTS = [
     ("LBL_ATK", "  ATK "),
     ("LBL_POWER", "Power: "),
     ("LBL_HP", "HP"),
+    # battle command menu + enemy attack line
+    ("OPT_FIGHT", "Fight"),
+    ("OPT_RUN", "Run"),
+    ("EATK_PRE", "The Slime hits thee for "),
+    ("EATK_POST", "!"),
 ]
 
 # ---------------------------------------------------------------------------

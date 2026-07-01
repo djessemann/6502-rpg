@@ -1016,6 +1016,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 
     ; --- GS_FIELD ---
     jsr UpdateHero
+    jsr WaterTick       ; shimmer the water palette (field only)
 
     ; Interactions/encounters only resolve when the hero is grid-aligned.
     ldx #HERO
@@ -1391,6 +1392,45 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 @ret6:
     rts
 .endproc
+
+; ----------------------------------------------------------------------------
+; WaterTick — animate the water: every 16 frames queue a 2-byte palette packet
+; cycling BG palette 1's two blues ($3F05-$3F06) through a 4-phase table.
+; Runs only in GS_FIELD, where the VRAM buffer is otherwise idle (the battle
+; palette reuses those slots for the enemy, so it must not run there).
+; ----------------------------------------------------------------------------
+.proc WaterTick
+    lda frame_count
+    and #$0F
+    beq :+
+    rts
+:   lda frame_count     ; phase = (frame_count / 16) mod 4
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    and #$03
+    tax
+    lda #$3F
+    sta VBUF
+    lda #$05
+    sta VBUF+1
+    lda #2
+    sta VBUF+2
+    lda water_c1,x
+    sta VBUF+3
+    lda water_c2,x
+    sta VBUF+4
+    rts
+.endproc
+
+.segment "RODATA"
+water_c1:               ; light-blue wave color per phase
+    .byte $21, $2C, $21, $2C
+water_c2:               ; deep-blue base color per phase
+    .byte $11, $01, $11, $01
+
+.segment "CODE"
 
 ; SetMessage — point msg_ptr at message id A (index into msg_table).
 .proc SetMessage

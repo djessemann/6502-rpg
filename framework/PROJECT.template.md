@@ -11,7 +11,12 @@ recipes in `framework/PATTERNS.md`; the realized code map in `ARCHITECTURE.md`.
 - **Mapper.** Slice: NROM (mapper 0). Target: [UxROM+CHR-RAM / MMC1 / MMC3 …]
   and why (PRG banking? CHR streaming for visual variety? battery save?).
 - **Save model.** [password | battery SRAM]. (Battery ⇒ MMC1/MMC3.)
-- **Mechanics.** [deliberately minimal — list them; everything else is content].
+- **Mechanics.** [deliberately minimal — the closed list, or a pointer to the
+  mechanics doc that holds it; everything else is content].
+- **Audio.** [sound engine + authoring tool, e.g. FamiStudio Sound Engine +
+  FamiStudio].
+- **Budget.** [ROM size target (PRG/CHR) → rough content counts: tilesets,
+  monsters, maps, pages of text. Set early in the engine phase.]
 
 ## Current phase
 [Slice | Engine | Content]

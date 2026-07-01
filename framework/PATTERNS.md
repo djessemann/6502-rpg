@@ -57,6 +57,17 @@ swap, no rendering-off, no flash.
   scrolling/streaming while a box is open.
 *Invariant: never blank the screen to show a box.*
 
+## Audio
+Don't write a sound driver — integrate a proven one. The **FamiStudio Sound
+Engine** is ca65-ready and its music is authored in the free FamiStudio app
+(visual, designer-friendly); **famitone2** is the lighter alternative. Call the
+driver's tick once per frame from NMI, including lag frames — the call site
+exists from day one as a stub, so integration is a drop-in, not a retrofit.
+Music/SFX are authored in the tracker and exported as data the build assembles,
+like all other content. Keep the driver and the current song's data resident
+(or in a fixed bank). *Invariant: the tick runs every frame; the driver is
+engine, song data is content.*
+
 ## Battle / scene change
 A full-screen scene (battle) is the exception to "draw in place": swap it in with
 rendering and NMI disabled, hold scroll at (0,0) while it's up, and on exit

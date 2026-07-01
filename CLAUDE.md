@@ -9,13 +9,19 @@ The active phase and its scope live in the **Current phase** section below.
 
 ## Documentation map
 - **CLAUDE.md** (this file) — binding contract for *this* project: scope
-  discipline, the active phase + scope, this game's choices, the hardware rules.
+  discipline, the active phase + scope, this game's choices. The hardware rules
+  are **imported** from `framework/HARDWARE.md` below (one copy, no mirror).
 - **framework/** — the portable, project-agnostic distillation (method,
   hardware contract, engine patterns, a `PROJECT` template). Canonical and
-  shareable; copy it to bootstrap a new NES RPG. The rules here mirror
-  `framework/HARDWARE.md`.
+  shareable; copy it to bootstrap a new NES RPG.
 - **ARCHITECTURE.md** — how *this* engine works now (code map) + how to add
   content. Read before changing a subsystem.
+- **design/** — this game's creative source material, authored by the designer:
+  the game-bible workbook (story, cast, stats, gear, locations, music, art
+  sets), `design/MECHANICS.md` (the closed mechanics list the engine's data
+  formats freeze against), and script/art/music references. `design/README.md`
+  says what goes where. Design truth lives here; the engine only ever reads
+  data generated from it.
 
 (The slice phase is complete; its old `SLICE.md` spec is retired — its current
 truth lives in ARCHITECTURE.md. Each new phase states its scope under **Current
@@ -58,10 +64,14 @@ When no phase is active (between phases), do nothing in-engine without a scope.
 1. **Engine (NOW / next)** — migrate to MMC3 + battery; add PRG banking, CHR
    bank-switching, and the real data-format interpreters. **Format-first:** define
    and freeze each on-ROM data format (map, tileset, entity, encounter, text,
-   stats) — with its generator emitter and its runtime reader — before pouring
-   content. (Save model decided: battery.)
-1. **Content (later)** — pour in tilesets, monsters, maps, and text via the
-   frozen formats.
+   stats, music/SFX) — with its generator emitter and its runtime reader — before
+   pouring content. (Save model decided: battery.) Also in this phase, as their
+   own steps: prove the headless emulator on a minimal MMC3 ROM (and `.sav`
+   persistence) *before* building on it; fix the **ROM/content budget** (PRG/CHR
+   sizes → how many tilesets, monsters, maps, and pages of text fit) *before*
+   content is mass-authored; and integrate the **sound driver** (see **Audio**).
+1. **Content (later)** — pour in tilesets, monsters, maps, text, and music via
+   the frozen formats.
 
 Do not pull a later phase's work forward — not even scaffolding — until I say
 the current phase is verified and we're moving on.
@@ -77,9 +87,18 @@ one step → one runnable `.nes` → I verify → next.
 direction — a 2×2 scrolling overworld with row streaming and in-place
 text/menu/dialogue boxes drawn over the map. See ARCHITECTURE.md.
 
-**Next: Engine phase** (format-first; target MMC3 + battery), starting with the
-map data format. Not started yet — the world bible and reference assets are being
-authored first.
+**Now: design authoring (between phases — no engine work).** The game bible,
+mechanics decisions, script, and reference assets are being authored into
+`design/` (see `design/README.md`). The gate to the engine phase is a **small
+reference slice of real content** (one region's tileset, a few characters, a
+couple of monsters, a short script, a small stats table) plus a filled-in
+`design/MECHANICS.md` — formats are frozen against real examples, never guesses.
+
+**Next: Engine phase** (format-first; target MMC3 + battery). Its numbered step
+list is written when the phase starts. Already fixed: step 0 proves the headless
+emulator on a minimal MMC3 ROM + `.sav` persistence; an early step sets the
+ROM/content budget; the first data format is the **map format**; and no format
+freezes until `design/MECHANICS.md` covers the decisions it encodes.
 
 -----
 
@@ -93,67 +112,40 @@ authored first.
   at the engine phase, not now (only the features we use; the IRQ split is opt-in).
 - **Output is a `.nes` ROM run in emulators** (FCEUX/Mesen/web) — no physical
   cartridge. MMC3 and battery save (persisted as a `.sav` file) are fully
-  emulated; our headless test emulator supports mapper 4, so the verify loop
-  carries into the engine phase unchanged.
+  emulated. The headless test emulator reportedly supports mapper 4 — engine
+  phase **step 0 proves it** (minimal MMC3 ROM + `.sav` persistence through
+  the headless loop) before anything is built on top of that assumption.
 - The structural rules below are **mapper-independent** and hold on NROM and MMC3
   alike. Banking and CHR bank-switching are added at the engine phase, not now.
 
 -----
 
-## Structural rules (NON-NEGOTIABLE, active now)
+## Audio (decided at doc level; built in the engine phase)
 
-These are cheap to honor now and agony to retrofit. They hold even in throwaway
-prototypes.
+- **Driver: integrate a proven sound engine, don't write one.** Default choice:
+  the **FamiStudio Sound Engine** (ca65-compatible; its music is authored in the
+  free FamiStudio desktop app, which is designer-friendly). famitone2 is the
+  lighter fallback. Confirm the pick when the engine-phase audio step starts.
+- **Authoring:** music and SFX are composed in FamiStudio and exported as data
+  the build assembles — same rule as art: generated source is committed, never
+  hand-edited.
+- The per-frame tick call site already exists (`SoundTick`, currently a stub,
+  called from NMI every frame including lag frames).
+- **Lands in the engine phase** as its own step: driver + one test song + one
+  test SFX. The real soundtrack is content-phase material.
 
-1. **Split game loop.** Game logic runs in the main thread. All PPU updates
-   happen in the **NMI handler**. A sound/music tick is called every frame,
-   including lag frames (may be a stub for the slice, but the call site exists).
-1. **PPU discipline.** NEVER write $2005/$2006/$2007 outside vblank. All
-   nametable/palette changes go into a **RAM VRAM buffer** ($0300–$03FF) and are
-   flushed in NMI only. Budget ≈160 bytes/frame. Always reset scroll after any
-   $2006 write.
-1. **OAM.** Shadow OAM at $0200; OAM DMA every frame in NMI.
-1. **Entities are struct-of-arrays.** Parallel arrays indexed by X
-   (`x[], y[], dir[], state[], …`). Never array-of-structs.
-1. **Grid-locked movement.** 16px steps. No sub-tile scrolling. Redraw a
-   row/column per camera step.
-1. **Sprites are scarce.** 8-per-scanline hardware limit. Stationary NPCs are
-   **background tiles**, not sprites. Only moving actors (the hero, and later a
-   wandering NPC) consume OAM.
-1. **Resident core tiles.** Font, window borders, hero, UI icons stay resident
-   and are never swapped. (Slice has one fixed tileset, so this is automatic
-   now; the rule matters once streaming exists.)
-1. **Stack discipline.** 256-byte stack. No deep call chains. Use jump tables /
-   the RTS trick for state dispatch.
+-----
 
-### Known traps (avoid by construction)
+## Structural rules & known traps (NON-NEGOTIABLE, active now)
 
-- PPU writes during rendering → glitches. (Buffer + NMI flush.)
-- Too many hardware sprites on one line → flicker. (NPCs as BG.)
-- Forgetting to restore scroll after a $2006 write.
-- Exceeding the vblank byte budget in one frame.
-- **Palette mirror.** $3F10/$3F14/$3F18/$3F1C mirror $3F00/$3F04/$3F08/$3F0C.
-  When you write all 32 palette bytes, the sprite-palette "color 0" entries land
-  on the BG backdrop slots — so they must hold the *same* value as the backdrop,
-  or they silently overwrite it. (This caused a black battle screen: the backdrop
-  was set to blue but a sprite-palette[0] of $0F clobbered it back to black.)
-- **Vblank budget.** NTSC vblank ≈ **2273 CPU cycles** (20 scanlines). OAM DMA
-  burns ~513, leaving ~1700; a naive `lda buf,y / sta $2007 / iny / dex / bne`
-  flush is ~15 cyc/byte → **~100+ tiles/frame** are safe, so the "≈160
-  bytes/frame" figure is realistic. (Don't confuse vblank length with the ~757
-  figure — that's wrong.) Still spread *very* large updates across frames, but
-  64 tiles/frame is comfortable.
-- **Palette change during a multi-frame nametable update flashes.** If you
-  redraw a region's tiles over several frames AND change its attribute (palette)
-  separately, there's a window where tiles render under the wrong palette (the
-  text box flashed green opening / white closing). Fix: route the transition
-  through **all-black** — clear the region to tile $00 (value 0 is
-  palette-independent), THEN switch the attribute, THEN draw the real content.
-  No tile is ever shown under a mismatched palette.
-- **Full-screen redraws** (field↔battle): you cannot do these in one vblank, so
-  do them with rendering AND NMI disabled (the same safe window as boot): blank
-  PPUMASK/PPUCTRL, write VRAM freely, reset scroll, re-enable. Push hidden/updated
-  OAM via a manual DMA before re-enabling so stale sprites don't flash.
+The full hardware contract — structural rules and known traps — is imported
+from the framework so it exists in exactly one place:
+
+@framework/HARDWARE.md
+
+This game's concrete parameters for those rules (RAM map, VRAM buffer at
+$0300–$03FF with a ≈160 bytes/frame budget, shadow OAM at $0200, the 16px
+grid) live in **ARCHITECTURE.md** with the code that implements them.
 
 -----
 
@@ -180,8 +172,12 @@ state machine, VRAM-buffer format, asset pipeline).
 ## How we work
 
 - One milestone/subsystem per session. State the success criterion in the prompt.
-- On failure, I provide concrete debugger output (nametable viewer, CPU/PPU log,
-  screenshot) — not symptom descriptions.
+- **Claude verifies first, with evidence.** Before handing over a ROM, and on
+  any reported failure, Claude drives the headless emulator itself — script the
+  inputs, capture and diff frames — and shows me the screenshots. I eyeball
+  results; I am not the debugger. Only when automation can't see the problem do
+  I open FCEUX, and then Claude tells me exactly what to capture (which viewer,
+  which moment).
 - Do not advance past an unverified ROM. Do not bundle multiple subsystems into
   one step.
 - Stay inside the current scope (see **Scope discipline** above). Out-of-scope

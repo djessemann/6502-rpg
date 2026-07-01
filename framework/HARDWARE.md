@@ -26,8 +26,9 @@ target alike. Cheap to honor up front, agony to retrofit.
 - **Too many sprites on one line** → flicker. Keep NPCs as background tiles.
 - **Forgetting to restore scroll** after a `$2006` write → the screen shifts.
 - **Vblank budget** ≈ 2273 CPU cycles (NTSC, ~20 scanlines). OAM DMA burns ~513,
-  leaving ~1700 → ~100 tiles/frame is safe. Spread very large updates over
-  frames; do full-screen redraws with rendering OFF.
+  leaving ~1700 → ~100 tiles/frame is safe. (Don't confuse vblank length with
+  the ~757-cycle figure sometimes quoted — that's wrong.) Spread very large
+  updates over frames; do full-screen redraws with rendering OFF.
 - **Palette mirror.** `$3F10/$14/$18/$1C` mirror `$3F00/$04/$08/$0C`. A
   sprite-palette color-0 entry must equal the backdrop or it overwrites it
   (classic cause of a screen going unexpectedly black).

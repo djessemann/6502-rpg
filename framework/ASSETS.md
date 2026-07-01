@@ -21,6 +21,10 @@ None of this depends on the mapper or the engine internals.
   **themed tile/character sets**, not unlimited unique art everywhere.
 - **Text is small.** Dialogue boxes are roughly **30 characters wide × 4 lines**.
   Write short.
+- **Sound is 5 voices.** Two melody/harmony voices, a bass voice, a noise
+  channel for percussion, and a sample channel. Think melody + counter-melody +
+  bass + drums; short loops. Distinct themes per place (town, field, dungeon,
+  battle) carry as much personality as the art does.
 
 ## What to make, and in what order
 1. **World/concept bible first.** The places, the kinds of characters, the tone,
@@ -37,6 +41,14 @@ None of this depends on the mapper or the engine internals.
 - **Script:** a plain doc — who says what, when; keep lines short.
 - **Stats:** spreadsheets with clean columns (e.g. monster: HP/ATK/DEF/XP/gold;
   item: name/effect/cost).
+- **Music:** **FamiStudio** (free, visual) — compose inside the NES's real
+  limits; the engine plays its exported data directly.
+
+## Where it lives
+Give the source material **one agreed home in the repo** (this project:
+`design/` — the game-bible workbook, mechanics decisions, script, reference
+art, FamiStudio files) so the authored truth and the formats that consume it
+stay next to each other and nothing lives only on someone's laptop.
 
 The exact file an importer consumes is defined **together, per subsystem, in the
 engine phase** (see `METHOD.md` → format-first). Don't mass-produce final assets

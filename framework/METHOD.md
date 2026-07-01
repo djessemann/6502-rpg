@@ -5,13 +5,20 @@
    encounter. Prove the bones feel right and a clean `.nes` builds on the
    toolchain. This is throwaway-grade, but it must obey `HARDWARE.md`.
 2. **Engine.** Decide the save model (it gates the mapper), then migrate to the
-   target mapper (PRG banking + CHR bank-switching/streaming). **Format-first:**
-   define and *freeze* each on-ROM data format — map, tileset, entity, encounter,
-   text, stats — with its generator emitter and its runtime reader, proven on the
-   smallest real content, before any of it is mass-authored. Changing a format
-   after content exists is the expensive mistake this order avoids.
-3. **Content.** Pour in tilesets, monsters, maps, and text through the frozen
-   formats. (Authoring assets can start during phase 2 — see `ASSETS.md`.)
+   target mapper (PRG banking + CHR bank-switching/streaming). **Step 0: prove
+   the verify loop on the target mapper** — a minimal ROM through the headless
+   emulator, plus save persistence if battery — before building on it. **Early:
+   fix the ROM/content budget** (PRG/CHR sizes → how many tilesets, monsters,
+   maps, and pages of text fit) so content is authored to guardrails, not hopes.
+   Then **format-first:** define and *freeze* each on-ROM data format — map,
+   tileset, entity, encounter, text, stats, music/SFX — with its generator
+   emitter and its runtime reader, proven on the smallest real content, before
+   any of it is mass-authored. Changing a format after content exists is the
+   expensive mistake this order avoids. Integrate the sound driver here as its
+   own step (an existing engine — see `PATTERNS.md` → Audio; the per-frame tick
+   call site exists from the slice).
+3. **Content.** Pour in tilesets, monsters, maps, text, and music through the
+   frozen formats. (Authoring assets can start during phase 2 — see `ASSETS.md`.)
 
 Do not start a later phase — not even scaffolding — until the current one is
 verified.
@@ -31,6 +38,11 @@ verified.
   pixel-for-pixel before handing the ROM over — e.g. "field after closing the
   menu == the frame before opening it." This catches glitches a glance misses.
   (Check the headless emulator supports your target mapper before relying on it.)
+- **The builder gathers the evidence.** On a reported failure, whoever builds
+  (person or agent) reproduces it in the headless emulator first — scripted
+  input, captured frames — rather than asking the verifier for debugger output.
+  Manual debugger captures (nametable viewer, CPU/PPU log) are the fallback,
+  with precise instructions on what to capture.
 - **Grow a regression suite.** As features/content accumulate, promote those
   one-off headless checks into a committed `tests/` of scripted scenarios +
   golden frames, run each milestone. It's the cheapest insurance against a

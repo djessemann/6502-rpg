@@ -2,7 +2,8 @@
 
 Code map for the working slice. This is the reference implementation the engine
 phase extends; it intentionally follows every structural rule in CLAUDE.md.
-For hardware gotchas hit while building it, see CLAUDE.md → **Known traps**.
+For hardware gotchas hit while building it, see `framework/HARDWARE.md` →
+**Known traps** (imported by CLAUDE.md).
 
 Build: `make` → `6502rpg.nes` (NROM, 32KB PRG + 8KB CHR). Art: regenerate with
 `python3 tools/gen_assets.py`, then `make`.
@@ -296,12 +297,20 @@ built mapper-independent. The engine phase adds, **format-first** (define +
 freeze each data format with its generator emitter and runtime reader before
 content):
 
+- **Step 0 — prove the verify loop on MMC3.** A minimal mapper-4 ROM through
+  the headless emulator, including `.sav` battery persistence, before anything
+  is built on it.
+- **ROM/content budget.** Fix PRG/CHR sizes and derive rough content counts
+  (tilesets, monsters, maps, pages of text) before content is mass-authored.
 - **PRG/CHR banking (MMC3).** Many tilesets/characters live in CHR-ROM banks,
   bank-switched per area/scene; font/UI tiles stay resident. Replaces the single
   fixed `chr.s`; tile indices become per-tileset.
 - **Map format.** A compiled map (tilemap + collision + metadata) the ROM reads,
-  replacing the hand-built `world[][]` in `gen_assets.py`. *Do this first.*
+  replacing the hand-built `world[][]` in `gen_assets.py`. *First format.*
 - **Entity / NPC / encounter formats.** Replace the hardcoded NPC and enemy.
-- **Stats + a real battle system**, replacing `GS_BATTLE`/`ENEMYDIE`/`BATTLEWAIT`.
+- **Stats + a real battle system**, replacing `GS_BATTLE`/`ENEMYDIE`/`BATTLEWAIT`
+  — built against the decisions in `design/MECHANICS.md`.
+- **Audio driver.** Integrate the chosen sound engine (see CLAUDE.md → Audio);
+  `SoundTick` stops being a stub. One test song + one test SFX prove it.
 - **Save system** (battery SRAM): Save/Continue; `.sav` in emulators.
 - Optional MMC3 scanline IRQ for a fixed HUD over the scrolling field (opt-in).

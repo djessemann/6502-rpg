@@ -1,0 +1,346 @@
+From 18e2bf5d2d6e8e60de392774454d7bfda6b431ee Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 1 Jul 2026 20:57:37 +0000
+Subject: [PATCH 3/5] feat(battle): authored 32x32 shaded slime + hero HP
+ status window
+
+The enemy is now true 32x32 art (curl tip, white pupil eyes, smile,
+gleam, deep-blue shading and grounded base) in classic slime blue,
+replacing the pixel-doubled 16x16 blob. DrawBattle also draws a small
+DQ-style status window (rows 2-4) showing the hero's HP, composed from
+the new LBL_HP fragment via ComposeHpRow; window frame tiles are now
+exported as WIN_*_TILE constants for fixed small windows.
+---
+ src/chr.s           |  32 +++++++-------
+ src/main.s          | 100 ++++++++++++++++++++++++++++++++++++++++++--
+ src/messages.s      |   5 ++-
+ src/tiles.inc       |   8 ++++
+ tools/gen_assets.py |  65 ++++++++++++++++++----------
+ 5 files changed, 167 insertions(+), 43 deletions(-)
+
+diff --git a/src/chr.s b/src/chr.s
+index 2fe20da..a323286 100644
+--- a/src/chr.s
++++ b/src/chr.s
+@@ -120,22 +120,22 @@
+     .byte $00, $00, $CC, $78, $30, $78, $CC, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $6F
+     .byte $00, $00, $CC, $CC, $DC, $7C, $0C, $78, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $70
+     .byte $00, $00, $FC, $18, $30, $60, $FC, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $71
+-    .byte $00, $00, $00, $00, $00, $00, $03, $03, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $72
+-    .byte $0F, $0F, $3F, $3F, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $73
+-    .byte $F0, $F0, $FC, $FC, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $74
+-    .byte $00, $00, $00, $00, $00, $00, $C0, $C0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $75
+-    .byte $0F, $0F, $0F, $0F, $3F, $3F, $3F, $3F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $76
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $C0, $C0, $C0, $C0, $00, $00   ; bg tile $77
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $30, $30, $30, $30, $00, $00   ; bg tile $78
+-    .byte $F0, $F0, $F0, $F0, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $79
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7A
+-    .byte $FF, $FF, $FF, $FF, $C0, $C0, $FF, $FF, $00, $00, $00, $00, $3F, $3F, $00, $00   ; bg tile $7B
+-    .byte $FF, $FF, $FF, $FF, $3F, $3F, $FF, $FF, $00, $00, $00, $00, $C0, $C0, $00, $00   ; bg tile $7C
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7D
+-    .byte $3F, $3F, $0F, $0F, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7E
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7F
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $80
+-    .byte $FC, $FC, $F0, $F0, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $81
++    .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $72
++    .byte $00, $01, $03, $07, $0F, $1F, $3F, $7F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $73
++    .byte $E0, $C0, $C0, $E0, $F0, $F8, $FC, $FE, $00, $00, $00, $00, $60, $F0, $60, $00   ; bg tile $74
++    .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $75
++    .byte $00, $01, $03, $03, $01, $01, $03, $03, $00, $00, $00, $00, $06, $06, $0C, $0C   ; bg tile $76
++    .byte $FF, $FF, $FF, $FF, $FF, $FF, $CF, $CF, $00, $00, $00, $00, $78, $78, $48, $48   ; bg tile $77
++    .byte $FF, $FF, $FF, $FF, $FF, $FF, $F3, $F3, $00, $00, $00, $00, $1E, $1E, $12, $12   ; bg tile $78
++    .byte $00, $80, $C0, $C0, $E0, $E0, $F0, $F0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $79
++    .byte $07, $07, $0F, $0F, $1F, $1F, $1F, $1F, $18, $18, $30, $30, $60, $60, $60, $60   ; bg tile $7A
++    .byte $FF, $FF, $FF, $7F, $BF, $C0, $FF, $FF, $78, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7B
++    .byte $FF, $FF, $FF, $FE, $FD, $03, $FF, $FF, $1E, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7C
++    .byte $F8, $F8, $FC, $FC, $FE, $FE, $FE, $FE, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7D
++    .byte $1F, $1F, $00, $00, $00, $00, $00, $00, $60, $60, $3F, $1F, $07, $00, $00, $00   ; bg tile $7E
++    .byte $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $FF, $FF, $00, $00, $00   ; bg tile $7F
++    .byte $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $FF, $FF, $FF, $00, $00, $00   ; bg tile $80
++    .byte $FE, $FE, $00, $00, $00, $00, $00, $00, $00, $00, $FC, $F8, $E0, $00, $00, $00   ; bg tile $81
+ 
+     .res $07E0, $00   ; pad to pattern table 1 ($1000)
+ 
+diff --git a/src/main.s b/src/main.s
+index 8af63ef..3101bc6 100644
+--- a/src/main.s
++++ b/src/main.s
+@@ -16,7 +16,7 @@
+ .import worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap, msg_table
+ .import frag_DMG_PRE, frag_DMG_POST
+ .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
+-.import frag_LBL_ATK, frag_LBL_POWER
++.import frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
+ 
+ ; ----------------------------------------------------------------------------
+ ; Constants
+@@ -61,6 +61,7 @@ BP_DEAD    = 2          ; damage shown, enemy at 0; A -> defeat message
+ BP_DEFEATED = 3         ; defeat shown; A -> erase enemy and return
+ 
+ ENEMY_MAX_HP = 15
++PLAYER_MAX_HP = 24
+ 
+ ; WIN_STEPS comes from tiles.inc (box draw chunks: 4 clear + 1 attr + 4 content).
+ ; The box is a full-width, 8-row window at screen rows 20-27, drawn in place over
+@@ -180,6 +181,7 @@ box_open:     .res 1   ; nonzero while a field box is open (freezes streaming)
+ 
+ ; battle / combat
+ enemy_hp:     .res 1
++player_hp:    .res 1
+ last_damage:  .res 1
+ battle_phase: .res 1
+ num:          .res 1   ; value AppendNumber renders
+@@ -466,6 +468,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     sta equipped
+     lda weapon_atk
+     sta player_atk
++    lda #PLAYER_MAX_HP
++    sta player_hp
+ 
+     lda #GS_FIELD
+     sta gamestate
+@@ -1943,6 +1947,94 @@ slot_dy:
+     lda #%01010101
+     sta PPUDATA
+     sta PPUDATA
++
++    ; --- hero status window (DQ-style): rows 2-4, cols 2-9, "HP dd" ---
++    jsr ComposeHpRow    ; interior row (6 tiles) into msg_buf
++    bit PPUSTATUS
++    lda #$20            ; row 2: top border
++    sta PPUADDR
++    lda #$42
++    sta PPUADDR
++    lda #WIN_TL_TILE
++    sta PPUDATA
++    lda #WIN_T_TILE
++    ldx #6
++:   sta PPUDATA
++    dex
++    bne :-
++    lda #WIN_TR_TILE
++    sta PPUDATA
++    lda #$20            ; row 3: L + "HP dd " + R
++    sta PPUADDR
++    lda #$62
++    sta PPUADDR
++    lda #WIN_L_TILE
++    sta PPUDATA
++    ldx #0
++:   lda msg_buf,x
++    sta PPUDATA
++    inx
++    cpx #6
++    bne :-
++    lda #WIN_R_TILE
++    sta PPUDATA
++    lda #$20            ; row 4: bottom border
++    sta PPUADDR
++    lda #$82
++    sta PPUADDR
++    lda #WIN_BL_TILE
++    sta PPUDATA
++    lda #WIN_BOTTOM_TILE
++    ldx #6
++:   sta PPUDATA
++    dex
++    bne :-
++    lda #WIN_BR_TILE
++    sta PPUDATA
++    ; status-window attributes -> palette 3 ($23C0-$23C2, $23C8-$23CA; the
++    ; rest of those 32px blocks is blank backdrop, so palette is moot there)
++    lda #$23
++    sta PPUADDR
++    lda #$C0
++    sta PPUADDR
++    lda #$FF
++    sta PPUDATA
++    sta PPUDATA
++    sta PPUDATA
++    lda #$23
++    sta PPUADDR
++    lda #$C8
++    sta PPUADDR
++    lda #$FF
++    sta PPUDATA
++    sta PPUDATA
++    sta PPUDATA
++    rts
++.endproc
++
++; ----------------------------------------------------------------------------
++; ComposeHpRow — build the status-window interior row "HP dd" into msg_buf,
++; padded with blanks so the first 6 bytes are always valid tiles.
++; ----------------------------------------------------------------------------
++.proc ComposeHpRow
++    lda #<msg_buf
++    sta dst
++    lda #>msg_buf
++    sta dst+1
++    lda #<frag_LBL_HP
++    sta ptr
++    lda #>frag_LBL_HP
++    sta ptr+1
++    jsr CopyFrag        ; "HP"
++    lda #$00
++    jsr StoreDst        ; space
++    lda player_hp
++    sta num
++    jsr AppendNumber    ; 1-2 digits
++    lda #$00            ; pad: a 1-digit HP still fills all 6 tiles
++    jsr StoreDst
++    lda #$00
++    jsr StoreDst
+     rts
+ .endproc
+ 
+@@ -2733,10 +2825,10 @@ pal_battle:
+     ; text box needs (the box's black is value 0 = the backdrop). Every color-0
+     ; entry is $0F so the $3F1x->$3F0x mirror can't clobber the backdrop.
+     .byte $0F, $0F, $10, $30   ; 0: blank screen
+-    .byte $0F, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
++    .byte $0F, $21, $11, $30   ; 1: enemy - light blue body, deep blue shade, white
+     .byte $0F, $0F, $10, $30
+-    .byte $0F, $30, $0F, $16   ; 3: window - black paper, white ink
+-    .byte $0F, $16, $27, $30
++    .byte $0F, $30, $16, $27   ; 3: window - white ink (matches the field window)
++    .byte $0F, $0F, $27, $12
+     .byte $0F, $06, $16, $30
+     .byte $0F, $0C, $1C, $30
+     .byte $0F, $0F, $30, $0F
+diff --git a/src/messages.s b/src/messages.s
+index 3abbc26..83837e3 100644
+--- a/src/messages.s
++++ b/src/messages.s
+@@ -2,7 +2,7 @@
+ ; msg_table: word pointers indexed by MSG_* (see tiles.inc).
+ ; frag_*: $FF-terminated tile streams for runtime composition.
+ 
+-.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER
++.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
+ 
+ .segment "RODATA"
+ msg_table:
+@@ -53,3 +53,6 @@ frag_LBL_ATK:
+ frag_LBL_POWER:
+     .byte $4D, $66, $6E, $5C, $69, $3C, $00, $FF
+ 
++frag_LBL_HP:
++    .byte $45, $4D, $FF
++
+diff --git a/src/tiles.inc b/src/tiles.inc
+index e867651..f5dc6f0 100644
+--- a/src/tiles.inc
++++ b/src/tiles.inc
+@@ -10,6 +10,14 @@ HERO_FRAME_OFF = $0C   ; add for walk frame 1 (3 views x 4 tiles)
+ ENEMY_TILE_BASE = $72
+ ARROW_TILE = $2B   ; 'more text' prompt
+ WIN_BOTTOM_TILE = $28   ; bottom-border tile (restores under the prompt)
++; Window frame tiles (for small fixed windows, e.g. battle status).
++WIN_TL_TILE = $21
++WIN_T_TILE = $22
++WIN_TR_TILE = $23
++WIN_L_TILE = $24
++WIN_R_TILE = $26
++WIN_BL_TILE = $27
++WIN_BR_TILE = $29
+ DIGIT_TILE = $32   ; '0'; digit d -> DIGIT_TILE + d
+ CURSOR_TILE = $2A   ; menu cursor (right triangle)
+ 
+diff --git a/tools/gen_assets.py b/tools/gen_assets.py
+index 17d1138..d56cac1 100644
+--- a/tools/gen_assets.py
++++ b/tools/gen_assets.py
+@@ -493,31 +493,49 @@ FRAGMENTS = [
+     ("WPN1", "Sword"),
+     ("LBL_ATK", "  ATK "),
+     ("LBL_POWER", "Power: "),
++    ("LBL_HP", "HP"),
+ ]
+ 
+ # ---------------------------------------------------------------------------
+-# Enemy: authored at 16x16, doubled to 32x32, drawn as background tiles on the
+-# battle screen (battle palette 1). Value 0 = transparent -> the blue battle
+-# backdrop shows through, so the blob's silhouette blends cleanly.
+-#   1 = body, 2 = shading, 3 = eyes/mouth (white).
++# Enemy: authored as TRUE 32x32 art, drawn as background tiles on the battle
++# screen (battle palette 1). Value 0 = transparent -> the black battle backdrop
++# shows through (silhouette, eye pupils, mouth). 1 = body (light blue),
++# 2 = shading (deep blue), 3 = eyes/gleam (white). A classic slime: curl tip,
++# big pupil eyes, wide smile, dark grounded base.
+ # ---------------------------------------------------------------------------
+-ENEMY16 = [
+-    "0000001111000000",
+-    "0000011111100000",
+-    "0000111111110000",
+-    "0001111111111000",
+-    "0011111111111100",
+-    "0011311113111100",
+-    "0111311113111110",
+-    "0111111111111110",
+-    "1111111111111111",
+-    "1111111111111111",
+-    "1111122221111111",
+-    "1111111111111111",
+-    "0111111111111110",
+-    "0011111111111100",
+-    "0000111111110000",
+-    "0000000000000000",
++ENEMY32 = [
++    "00000000000000001110000000000000",
++    "00000000000000011100000000000000",
++    "00000000000000111100000000000000",
++    "00000000000001111110000000000000",
++    "00000000000011111331000000000000",
++    "00000000000111113333100000000000",
++    "00000000001111111331110000000000",
++    "00000000011111111111111000000000",
++    "00000000111111111111111100000000",
++    "00000001111111111111111110000000",
++    "00000011111111111111111111000000",
++    "00000011111111111111111111000000",
++    "00000221133331111113333111100000",
++    "00000221133331111113333111100000",
++    "00002211130031111113003111110000",
++    "00002211130031111113003111110000",
++    "00022111133331111113333111111000",
++    "00022111111111111111111111111000",
++    "00221111111111111111111111111100",
++    "00221111011111111111111011111100",
++    "02211111101111111111110111111110",
++    "02211111110000000000001111111110",
++    "02211111111111111111111111111110",
++    "02211111111111111111111111111110",
++    "02211111111111111111111111111110",
++    "02211111111111111111111111111110",
++    "00222222222222222222222222222200",
++    "00022222222222222222222222222000",
++    "00000222222222222222222222200000",
++    "00000000000000000000000000000000",
++    "00000000000000000000000000000000",
++    "00000000000000000000000000000000",
+ ]
+ 
+ # Where the NPC stands, in 16px grid cells (must match NPC_GX/GY in main.s).
+@@ -749,7 +767,7 @@ def main():
+ 
+     # Enemy (32x32 = 4x4 tiles).
+     e_base = nid
+-    for tile in split_grid(double(ENEMY16), 4):
++    for tile in split_grid(ENEMY32, 4):
+         bg[nid] = tile
+         nid += 1
+ 
+@@ -955,6 +973,9 @@ def main():
+         f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
+         f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")
+         f.write(f"WIN_BOTTOM_TILE = ${W_ids['B']:02X}   ; bottom-border tile (restores under the prompt)\n")
++        f.write("; Window frame tiles (for small fixed windows, e.g. battle status).\n")
++        for name in ("TL", "T", "TR", "L", "R", "BL", "BR"):
++            f.write(f"WIN_{name}_TILE = ${W_ids[name]:02X}\n")
+         f.write(f"DIGIT_TILE = ${font_id['0']:02X}   ; '0'; digit d -> DIGIT_TILE + d\n")
+         f.write(f"CURSOR_TILE = ${font_id[CURSOR]:02X}   ; menu cursor (right triangle)\n\n")
+         f.write("; World geometry (16px metatiles): 2 screens wide, 1 tall.\n")
+-- 
+2.43.0
+

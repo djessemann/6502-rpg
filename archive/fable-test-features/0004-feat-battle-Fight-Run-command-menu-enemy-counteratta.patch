@@ -1,0 +1,528 @@
+From 9a19443bb07469dac2172b4e18bfad5649e5fdb0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 1 Jul 2026 21:04:21 +0000
+Subject: [PATCH 4/5] feat(battle): Fight/Run command menu, enemy
+ counterattack, player HP
+
+Battle now runs a proper DQ loop: intro -> Fight/Run menu (the existing
+menu primitive with a new MENU_BATTLE id; B can't back out) -> player
+damage (with a -1 frame-parity wobble) -> slime counterattack for 1-2 ->
+menu again, until the slime dies or the hero flees (MSG_FLEE) or drops
+to 0 HP (MSG_DEAD -> revive at full HP back on the field). Player HP
+persists between battles and the status window live-updates via a VRAM
+packet flushed in GS_BWAIT (hp_dirty).
+---
+ src/main.s          | 298 +++++++++++++++++++++++++++++++++++++-------
+ src/messages.s      |  25 +++-
+ src/tiles.inc       |   2 +
+ tools/gen_assets.py |   7 ++
+ 4 files changed, 287 insertions(+), 45 deletions(-)
+
+diff --git a/src/main.s b/src/main.s
+index 3101bc6..804d443 100644
+--- a/src/main.s
++++ b/src/main.s
+@@ -17,6 +17,7 @@
+ .import frag_DMG_PRE, frag_DMG_POST
+ .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
+ .import frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
++.import frag_OPT_FIGHT, frag_OPT_RUN, frag_EATK_PRE, frag_EATK_POST
+ 
+ ; ----------------------------------------------------------------------------
+ ; Constants
+@@ -52,13 +53,20 @@ CTX_MENU   = 2          ; -> GS_MENU (handle cursor input)
+ ; menus
+ MENU_CMD   = 0          ; Talk / Equip
+ MENU_EQUIP = 1          ; weapon list
++MENU_BATTLE = 2         ; Fight / Run
+ NUM_WEAPONS = 2
+ 
+-; battle phases (what the pending A press does)
+-BP_INTRO   = 0          ; intro shown; A -> first attack
+-BP_FIGHT   = 1          ; damage shown, enemy alive; A -> attack again
+-BP_DEAD    = 2          ; damage shown, enemy at 0; A -> defeat message
+-BP_DEFEATED = 3         ; defeat shown; A -> erase enemy and return
++; battle phases. The battle loop is: intro -> command menu -> (Fight: player
++; damage message -> enemy counterattack message -> menu again) until one side
++; drops, or (Run: flee message -> back to the field).
++BP_INTRO   = 0          ; intro showing; when it ends -> command menu
++BP_MENU    = 1          ; message shown, enemy alive; A -> command menu
++BP_ENEMYTURN = 2        ; player damage shown, enemy alive; A -> enemy attacks
++BP_DEAD    = 3          ; player damage shown, enemy at 0; A -> defeat message
++BP_DEFEATED = 4         ; defeat shown; A -> erase enemy and return
++BP_FLED    = 5          ; flee message shown; A -> back to the field
++BP_DYING   = 6          ; enemy hit shown, hero at 0 HP; A -> death message
++BP_PLAYERDEAD = 7       ; death message shown; A -> revive and return
+ 
+ ENEMY_MAX_HP = 15
+ PLAYER_MAX_HP = 24
+@@ -184,6 +192,7 @@ enemy_hp:     .res 1
+ player_hp:    .res 1
+ last_damage:  .res 1
+ battle_phase: .res 1
++hp_dirty:     .res 1   ; status window needs a redraw (flushed in GS_BWAIT)
+ num:          .res 1   ; value AppendNumber renders
+ 
+ ; menus / equipment
+@@ -1038,28 +1047,90 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     rts
+ 
+ @bwait:
+-    ; A battle message is on screen; A advances combat per battle_phase.
++    ; A battle message is on screen. Flush a pending HP-window update first
++    ; (the VRAM buffer is free in this wait state), then A advances combat
++    ; per battle_phase.
++    lda hp_dirty
++    beq @bw_input
++    jsr UpdateHpWindow
++    lda #0
++    sta hp_dirty
++    rts
++@bw_input:
+     lda pad1_new
+     and #BTN_A
+-    beq @ret
+-    lda battle_phase
++    bne :+
++    rts
++:   lda battle_phase
+     cmp #BP_DEFEATED
+     beq @bw_done
+     cmp #BP_DEAD
+     beq @bw_defeat
+-    ; BP_INTRO or BP_FIGHT -> attack
+-    jsr DoAttack            ; sets last_damage, decrements enemy_hp, composes msg
++    cmp #BP_MENU
++    bne :+
++    jsr OpenBattleMenu      ; back to the Fight/Run menu
++    rts
++:   cmp #BP_ENEMYTURN
++    bne :+
++    jmp @bw_enemyturn
++:   cmp #BP_FLED
++    bne :+
++    jsr ExitBattle          ; fled: straight back to the field
++    rts
++:   cmp #BP_DYING
++    beq @bw_dying
++    cmp #BP_PLAYERDEAD
++    bne @bw_ret
++    lda #PLAYER_MAX_HP      ; revive and wake back on the field
++    sta player_hp
++    jsr ExitBattle
++@bw_ret:
++    rts
++@bw_defeat:
++    lda #MSG_SLIME_DEFEATED
++    jsr SetMessage
++    lda #BP_DEFEATED
++    sta battle_phase
++    jmp @bw_show
++@bw_dying:
++    lda #MSG_DEAD
++    jsr SetMessage
++    lda #BP_PLAYERDEAD
++    sta battle_phase
++    jmp @bw_show
++@bw_done:
++    lda #0
++    sta job_step
++    lda #GS_ENEMYDIE        ; erase the enemy, then ExitBattle
++    sta gamestate
++    rts
++@bw_enemyturn:
++    ; The slime strikes back for 1-2 damage, floored at 0 HP.
++    lda frame_count
++    and #$01
++    clc
++    adc #1
++    sta last_damage
++    lda player_hp
++    sec
++    sbc last_damage
++    bcs :+
++    lda #0
++:   sta player_hp
++    lda #1
++    sta hp_dirty            ; status window redraws once the message is up
++    jsr ComposeEnemyHit
+     lda #<msg_buf
+     sta msg_ptr
+     lda #>msg_buf
+     sta msg_ptr+1
+-    lda enemy_hp
+-    bne @bw_alive
+-    lda #BP_DEAD
++    lda player_hp
++    beq @bw_todying
++    lda #BP_MENU
+     sta battle_phase
+     jmp @bw_show
+-@bw_alive:
+-    lda #BP_FIGHT
++@bw_todying:
++    lda #BP_DYING
+     sta battle_phase
+ @bw_show:
+     lda #0
+@@ -1067,22 +1138,6 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     lda #GS_TEXT
+     sta gamestate
+     rts
+-@bw_defeat:
+-    lda #MSG_SLIME_DEFEATED
+-    jsr SetMessage
+-    lda #BP_DEFEATED
+-    sta battle_phase
+-    lda #0
+-    sta cur_line
+-    lda #GS_TEXT
+-    sta gamestate
+-    rts
+-@bw_done:
+-    lda #0
+-    sta job_step
+-    lda #GS_ENEMYDIE        ; erase the enemy, then ExitBattle
+-    sta gamestate
+-    rts
+ 
+ @enemydie:
+     ; Erase the enemy one tile-row per frame through the VRAM buffer.
+@@ -1090,8 +1145,9 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     inc job_step
+     lda job_step
+     cmp #4
+-    bcc @ret
+-    lda #DIE_DELAY
++    bcs :+
++    rts
++:   lda #DIE_DELAY
+     sta battle_timer
+     lda #GS_BATTLEWAIT
+     sta gamestate
+@@ -1099,8 +1155,9 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+ 
+ @battlewait:
+     dec battle_timer
+-    bne @ret
+-    jsr ExitBattle      ; cut back to the field at the prior position
++    beq :+
++    rts
++:   jsr ExitBattle      ; cut back to the field at the prior position
+     rts
+ 
+ @opening:
+@@ -1134,7 +1191,12 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     lda msg_context
+     cmp #CTX_BATTLE
+     bne @te_notbattle
+-    lda #GS_BWAIT       ; battle: wait for A to drive combat
++    lda battle_phase
++    cmp #BP_INTRO
++    bne :+
++    jsr OpenBattleMenu  ; intro shown: straight to the Fight/Run menu
++    rts
++:   lda #GS_BWAIT       ; battle: wait for A to drive combat
+     sta gamestate
+     rts
+ @te_notbattle:
+@@ -1205,15 +1267,21 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+ @m_notdown:
+     lda pad1_new
+     and #BTN_B
+-    bne @m_cancel
+-    lda pad1_new
++    beq :+
++    jmp @m_cancel
++:   lda pad1_new
+     and #BTN_A
+-    beq @m_done
++    bne :+
++    rts
++:
+     ; --- A: confirm the highlighted item ---
+     lda menu_id
+     cmp #MENU_EQUIP
+     beq @m_equip
+-    ; command menu
++    cmp #MENU_BATTLE
++    bne :+
++    jmp @m_battle
++:   ; command menu
+     lda menu_cursor
+     bne @m_open_equip   ; cursor 1 = Equip
+     ; cursor 0 = Talk
+@@ -1252,9 +1320,45 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     sta player_atk
+     jsr RenderMenu      ; re-render so "Power" updates
+     rts
++@m_battle:
++    lda menu_cursor
++    bne @m_run
++    ; Fight: deal damage, then let the enemy answer (or die)
++    jsr DoAttack        ; damage + "takes N damage" line into msg_buf
++    lda #<msg_buf
++    sta msg_ptr
++    lda #>msg_buf
++    sta msg_ptr+1
++    lda #CTX_BATTLE
++    sta msg_context
++    lda enemy_hp
++    beq @m_edead
++    lda #BP_ENEMYTURN
++    bne @m_bset         ; (branch always)
++@m_edead:
++    lda #BP_DEAD
++@m_bset:
++    sta battle_phase
++    jmp @m_showmsg
++@m_run:
++    lda #CTX_BATTLE
++    sta msg_context
++    lda #MSG_FLEE
++    jsr SetMessage
++    lda #BP_FLED
++    sta battle_phase
++@m_showmsg:
++    lda #0
++    sta cur_line
++    lda #GS_TEXT
++    sta gamestate
++    rts
+ @m_cancel:
+     lda menu_id
+-    cmp #MENU_EQUIP
++    cmp #MENU_BATTLE
++    bne :+
++    rts                 ; no backing out of a battle with B
++:   cmp #MENU_EQUIP
+     bne @m_close
+     lda #MENU_CMD       ; equip -> back to command menu
+     sta menu_id
+@@ -1299,10 +1403,14 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     rts
+ .endproc
+ 
+-; DoAttack — deal the equipped weapon's attack power to the enemy (capped to
+-; remaining HP) and compose the "takes N damage" line.
++; DoAttack — deal the equipped weapon's attack power (with a -1 wobble from
++; the frame parity) to the enemy, capped to remaining HP, and compose the
++; "takes N damage" line.
+ .proc DoAttack
++    lda frame_count
++    lsr a               ; carry = frame parity
+     lda player_atk
++    sbc #0              ; atk or atk-1
+     cmp enemy_hp
+     bcc :+
+     lda enemy_hp        ; never report more than what's left
+@@ -1447,7 +1555,10 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     lda menu_id
+     cmp #MENU_EQUIP
+     beq @equip
+-
++    cmp #MENU_BATTLE
++    bne :+
++    jmp @battle
++:
+     ; command menu: Talk / Equip
+     ldx #0
+     jsr EmitCursor
+@@ -1518,6 +1629,105 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     lda #MSG_END
+     jsr StoreDst
+     rts
++
++@battle:
++    ; battle menu: Fight / Run
++    ldx #0
++    jsr EmitCursor
++    lda #<frag_OPT_FIGHT
++    sta ptr
++    lda #>frag_OPT_FIGHT
++    sta ptr+1
++    jsr CopyFrag
++    lda #MSG_NEWLINE
++    jsr StoreDst
++    ldx #1
++    jsr EmitCursor
++    lda #<frag_OPT_RUN
++    sta ptr
++    lda #>frag_OPT_RUN
++    sta ptr+1
++    jsr CopyFrag
++    lda #MSG_NEWLINE
++    jsr StoreDst
++    lda #MSG_NEWLINE     ; line 2 blank
++    jsr StoreDst
++    lda #MSG_END         ; line 3 blank + end
++    jsr StoreDst
++    rts
++.endproc
++
++; OpenBattleMenu — (re)compose and show the Fight/Run menu in the already-open
++; battle box. Cursor resets to Fight.
++.proc OpenBattleMenu
++    lda #MENU_BATTLE
++    sta menu_id
++    lda #0
++    sta menu_cursor
++    lda #1
++    sta menu_max
++    lda #CTX_MENU
++    sta msg_context
++    jsr ComposeMenu
++    lda #<msg_buf
++    sta msg_ptr
++    lda #>msg_buf
++    sta msg_ptr+1
++    lda #0
++    sta cur_line
++    lda #GS_TEXT
++    sta gamestate
++    rts
++.endproc
++
++; ComposeEnemyHit — build "<EATK_PRE><last_damage><EATK_POST>" + 3 blank lines
++; + end into msg_buf, ready for RenderLine.
++.proc ComposeEnemyHit
++    lda #<msg_buf
++    sta dst
++    lda #>msg_buf
++    sta dst+1
++    lda #<frag_EATK_PRE
++    sta ptr
++    lda #>frag_EATK_PRE
++    sta ptr+1
++    jsr CopyFrag
++    lda last_damage
++    sta num
++    jsr AppendNumber
++    lda #<frag_EATK_POST
++    sta ptr
++    lda #>frag_EATK_POST
++    sta ptr+1
++    jsr CopyFrag
++    lda #MSG_NEWLINE
++    jsr StoreDst
++    lda #MSG_NEWLINE
++    jsr StoreDst
++    lda #MSG_NEWLINE
++    jsr StoreDst
++    lda #MSG_END
++    jsr StoreDst
++    rts
++.endproc
++
++; UpdateHpWindow — queue a VRAM packet rewriting the status window's interior
++; row ("HP dd") on the battle screen. Battle only (fixed nametable address).
++.proc UpdateHpWindow
++    jsr ComposeHpRow    ; 6 tiles into msg_buf
++    lda #$20
++    sta VBUF
++    lda #$63
++    sta VBUF+1
++    lda #6
++    sta VBUF+2
++    ldx #0
++:   lda msg_buf,x
++    sta VBUF+3,x
++    inx
++    cpx #6
++    bne :-
++    rts
+ .endproc
+ 
+ ; EmitCursor — emit the cursor tile (if menu_cursor == X) or a blank, then a
+diff --git a/src/messages.s b/src/messages.s
+index 83837e3..5d91f80 100644
+--- a/src/messages.s
++++ b/src/messages.s
+@@ -2,7 +2,7 @@
+ ; msg_table: word pointers indexed by MSG_* (see tiles.inc).
+ ; frag_*: $FF-terminated tile streams for runtime composition.
+ 
+-.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
++.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP, frag_OPT_FIGHT, frag_OPT_RUN, frag_EATK_PRE, frag_EATK_POST
+ 
+ .segment "RODATA"
+ msg_table:
+@@ -10,6 +10,8 @@ msg_table:
+     .word msg_SLIME_APPEARS
+     .word msg_SLIME_DEFEATED
+     .word msg_NOBODY
++    .word msg_FLEE
++    .word msg_DEAD
+ 
+ msg_NPC_GREETING:
+     .byte $45, $60, $00, $70, $66, $6C, $2D, $FE, $FE, $FE, $FD, $54, $5C, $63, $5A, $66
+@@ -28,6 +30,14 @@ msg_NOBODY:
+     .byte $51, $5F, $5C, $69, $5C, $00, $60, $6A, $00, $65, $66, $00, $66, $65, $5C, $00
+     .byte $6B, $5F, $5C, $69, $5C, $31, $FE, $FE, $FE, $FF
+ 
++msg_FLEE:
++    .byte $51, $5F, $66, $6C, $00, $5F, $58, $6A, $6B, $00, $5D, $63, $5C, $5B, $31, $FE
++    .byte $FE, $FE, $FF
++
++msg_DEAD:
++    .byte $51, $5F, $66, $6C, $00, $58, $69, $6B, $00, $5B, $5C, $5D, $5C, $58, $6B, $5C
++    .byte $5B, $31, $31, $31, $FE, $FE, $FE, $FF
++
+ frag_DMG_PRE:
+     .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $6B, $58, $62, $5C, $6A, $00
+     .byte $FF
+@@ -56,3 +66,16 @@ frag_LBL_POWER:
+ frag_LBL_HP:
+     .byte $45, $4D, $FF
+ 
++frag_OPT_FIGHT:
++    .byte $43, $60, $5E, $5F, $6B, $FF
++
++frag_OPT_RUN:
++    .byte $4F, $6C, $65, $FF
++
++frag_EATK_PRE:
++    .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $5F, $60, $6B, $6A, $00, $6B
++    .byte $5F, $5C, $5C, $00, $5D, $66, $69, $00, $FF
++
++frag_EATK_POST:
++    .byte $2D, $FF
++
+diff --git a/src/tiles.inc b/src/tiles.inc
+index f5dc6f0..c273786 100644
+--- a/src/tiles.inc
++++ b/src/tiles.inc
+@@ -36,3 +36,5 @@ MSG_NPC_GREETING = 0
+ MSG_SLIME_APPEARS = 1
+ MSG_SLIME_DEFEATED = 2
+ MSG_NOBODY = 3
++MSG_FLEE = 4
++MSG_DEAD = 5
+diff --git a/tools/gen_assets.py b/tools/gen_assets.py
+index d56cac1..d893238 100644
+--- a/tools/gen_assets.py
++++ b/tools/gen_assets.py
+@@ -478,6 +478,8 @@ MESSAGES = [
+     ("SLIME_APPEARS", "A Slime draws near!"),
+     ("SLIME_DEFEATED", "The Slime is defeated!"),
+     ("NOBODY", "There is no one there."),
++    ("FLEE", "Thou hast fled."),
++    ("DEAD", "Thou art defeated..."),
+ ]
+ 
+ # Fragments composed with a runtime number into a one-line battle message:
+@@ -494,6 +496,11 @@ FRAGMENTS = [
+     ("LBL_ATK", "  ATK "),
+     ("LBL_POWER", "Power: "),
+     ("LBL_HP", "HP"),
++    # battle command menu + enemy attack line
++    ("OPT_FIGHT", "Fight"),
++    ("OPT_RUN", "Run"),
++    ("EATK_PRE", "The Slime hits thee for "),
++    ("EATK_POST", "!"),
+ ]
+ 
+ # ---------------------------------------------------------------------------
+-- 
+2.43.0
+

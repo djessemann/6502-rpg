@@ -1,0 +1,629 @@
+From 43c864621ea3c098b5129339b2dc2a2f88f15d44 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 30 Jun 2026 21:01:18 +0000
+Subject: [PATCH] Reskin the vertical slice to a space-station theme
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Content-only reskin of the existing engine (scrolling 2x2 overworld with
+row streaming and in-place text/menu/dialogue boxes over the map). No
+engine logic, no docs touched — changes go through the documented content
+entry points only:
+
+- tools/gen_assets.py: rethemed terrain art (metal deck, walkway plates,
+  bulkhead walls, supply crates, floor vents/lights, a glowing energy
+  hazard in the "water" slot), an astronaut hero, a service-droid NPC, a
+  one-eyed alien enemy, and space-themed message text. Symbol names
+  (MSG_*, frag_*) are unchanged so main.s still resolves them.
+- src/main.s: pal_field / pal_battle recolored (steel-gray deck, cyan
+  hazard, teal droid, white text; black space void + green alien in
+  battle). The recolor is the only main.s change.
+- src/chr.s, src/messages.s: regenerated from gen_assets.py.
+
+Map layout, tile ordering, and collision are unchanged, so src/field.s
+and src/tiles.inc are byte-identical.
+
+Verified headless end to end: boot, scrolling (hero centered, world pans),
+in-place command menu and two-page dialogue over the scrolling map with no
+flash, clean map restore on close, encounter, and the alien battle loop
+returning to the field at the prior position.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017WhrMENKrWYz9jN2gu1sQQ
+---
+ src/chr.s           | 116 ++++++++++----------
+ src/main.s          |  18 +--
+ src/messages.s      |  21 ++--
+ tools/gen_assets.py | 262 +++++++++++++++++++++++---------------------
+ 4 files changed, 217 insertions(+), 200 deletions(-)
+
+diff --git a/src/chr.s b/src/chr.s
+index 478628d..8da51d0 100644
+--- a/src/chr.s
++++ b/src/chr.s
+@@ -6,38 +6,38 @@
+ .segment "CHARS"
+     ; --- pattern table 0: background ---
+     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $00
+-    .byte $FF, $FF, $FF, $FF, $3F, $3F, $FF, $FF, $00, $00, $00, $00, $C0, $C0, $00, $00   ; bg tile $01
+-    .byte $3F, $3F, $FF, $FF, $F3, $F3, $FF, $FF, $C0, $C0, $00, $00, $0C, $0C, $00, $00   ; bg tile $02
+-    .byte $F3, $F3, $FF, $FF, $FF, $FF, $3F, $3F, $0C, $0C, $00, $00, $00, $00, $C0, $C0   ; bg tile $03
+-    .byte $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $00, $00, $00, $00, $0C, $0C, $00, $00   ; bg tile $04
+-    .byte $FF, $FF, $FC, $FC, $F3, $F3, $F3, $F3, $00, $00, $03, $03, $0F, $0F, $0F, $0F   ; bg tile $05
+-    .byte $FF, $FF, $3F, $3F, $CF, $CF, $3F, $3F, $00, $00, $C0, $C0, $F0, $F0, $F0, $F0   ; bg tile $06
+-    .byte $F3, $F3, $FC, $FC, $FF, $FF, $FF, $FF, $0F, $0F, $03, $03, $00, $00, $00, $00   ; bg tile $07
+-    .byte $CF, $CF, $3F, $3F, $FF, $FF, $FF, $FF, $F0, $F0, $C0, $C0, $00, $00, $00, $00   ; bg tile $08
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF   ; bg tile $09
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF   ; bg tile $0A
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CF, $CF, $FF, $FF, $FF, $FF, $FC, $FC   ; bg tile $0B
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CF, $CF, $FF, $FF, $FF, $FF   ; bg tile $0C
+-    .byte $C0, $C0, $00, $00, $0C, $0C, $00, $00, $3F, $3F, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0D
+-    .byte $03, $03, $00, $00, $30, $30, $00, $00, $FC, $FC, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0E
+-    .byte $0C, $0C, $00, $00, $CF, $CF, $FF, $FF, $FF, $FF, $FF, $FF, $3F, $3F, $0F, $0F   ; bg tile $0F
+-    .byte $30, $30, $00, $00, $F3, $F3, $FF, $FF, $FF, $FF, $FF, $FF, $FC, $FC, $F0, $F0   ; bg tile $10
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $33, $33, $FF, $FF   ; bg tile $11
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $33, $33, $FF, $FF   ; bg tile $12
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CC, $CC, $FF, $FF, $FF, $FF   ; bg tile $13
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CC, $CC, $FF, $FF, $FF, $FF   ; bg tile $14
+-    .byte $FF, $FF, $F0, $F0, $C0, $C0, $C0, $C0, $00, $00, $0F, $0F, $3F, $3F, $3F, $3F   ; bg tile $15
+-    .byte $FF, $FF, $0F, $0F, $03, $03, $03, $03, $00, $00, $F0, $F0, $FC, $FC, $FC, $FC   ; bg tile $16
+-    .byte $C0, $C0, $F0, $F0, $FF, $FF, $FF, $FF, $3F, $3F, $0F, $0F, $00, $00, $00, $00   ; bg tile $17
+-    .byte $03, $03, $0F, $0F, $FF, $FF, $FF, $FF, $FC, $FC, $F0, $F0, $00, $00, $00, $00   ; bg tile $18
+-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $19
+-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1A
+-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1B
+-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1C
+-    .byte $0F, $18, $30, $36, $30, $30, $18, $3F, $00, $07, $0F, $0F, $0F, $0F, $07, $00   ; bg tile $1D
+-    .byte $E0, $30, $18, $58, $18, $18, $30, $F0, $00, $C0, $E0, $E0, $E0, $E0, $C0, $00   ; bg tile $1E
+-    .byte $7F, $7F, $7F, $7F, $7F, $7F, $3F, $1F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $1F
+-    .byte $F8, $F8, $F8, $F8, $F8, $F8, $F0, $E0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $20
++    .byte $00, $00, $30, $30, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $01
++    .byte $03, $03, $03, $03, $03, $03, $03, $03, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC   ; bg tile $02
++    .byte $00, $00, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00   ; bg tile $03
++    .byte $33, $33, $03, $03, $03, $03, $FF, $FF, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00   ; bg tile $04
++    .byte $00, $00, $00, $00, $03, $03, $0F, $0F, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $05
++    .byte $00, $00, $00, $00, $C0, $C0, $F0, $F0, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $06
++    .byte $0F, $0F, $03, $03, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $07
++    .byte $F0, $F0, $C0, $C0, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $08
++    .byte $FF, $FF, $C0, $C0, $C0, $C0, $C0, $C0, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $09
++    .byte $FF, $FF, $03, $03, $03, $03, $03, $03, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0A
++    .byte $C0, $C0, $C0, $C0, $C0, $C0, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0B
++    .byte $03, $03, $03, $03, $03, $03, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0C
++    .byte $FF, $FF, $FF, $FF, $F3, $F3, $F0, $F0, $FF, $FF, $C0, $C0, $CC, $CC, $CF, $CF   ; bg tile $0D
++    .byte $FF, $FF, $FF, $FF, $CF, $CF, $0F, $0F, $FF, $FF, $03, $03, $33, $33, $F3, $F3   ; bg tile $0E
++    .byte $F0, $F0, $F3, $F3, $FF, $FF, $FF, $FF, $CF, $CF, $CC, $CC, $C0, $C0, $FF, $FF   ; bg tile $0F
++    .byte $0F, $0F, $CF, $CF, $FF, $FF, $FF, $FF, $F3, $F3, $33, $33, $03, $03, $FF, $FF   ; bg tile $10
++    .byte $FF, $FF, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $11
++    .byte $FF, $FF, $00, $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $12
++    .byte $00, $00, $00, $00, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $13
++    .byte $00, $00, $00, $00, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $14
++    .byte $00, $00, $33, $33, $00, $00, $33, $33, $FF, $FF, $CC, $CC, $FF, $FF, $CC, $CC   ; bg tile $15
++    .byte $00, $00, $33, $33, $00, $00, $33, $33, $FF, $FF, $CC, $CC, $FF, $FF, $CC, $CC   ; bg tile $16
++    .byte $00, $00, $33, $33, $00, $00, $33, $33, $FF, $FF, $CC, $CC, $FF, $FF, $CC, $CC   ; bg tile $17
++    .byte $00, $00, $33, $33, $00, $00, $33, $33, $FF, $FF, $CC, $CC, $FF, $FF, $CC, $CC   ; bg tile $18
++    .byte $F3, $F3, $C0, $C0, $0C, $0C, $F3, $F3, $0C, $0C, $3F, $3F, $F3, $F3, $0F, $0F   ; bg tile $19
++    .byte $C3, $C3, $CC, $CC, $03, $03, $3C, $3C, $3C, $3C, $F3, $F3, $FC, $FC, $C3, $C3   ; bg tile $1A
++    .byte $C3, $C3, $0C, $0C, $F0, $F0, $C3, $C3, $3C, $3C, $F3, $F3, $0F, $0F, $3C, $3C   ; bg tile $1B
++    .byte $C3, $C3, $33, $33, $F0, $F0, $0C, $0C, $3F, $3F, $FC, $FC, $CF, $CF, $F3, $F3   ; bg tile $1C
++    .byte $0F, $18, $30, $37, $30, $3F, $3F, $7F, $00, $07, $0F, $0F, $0F, $00, $00, $00   ; bg tile $1D
++    .byte $C0, $60, $30, $B0, $30, $F0, $F0, $F8, $00, $80, $C0, $C0, $C0, $00, $00, $00   ; bg tile $1E
++    .byte $78, $7F, $78, $7F, $7F, $3F, $30, $60, $07, $07, $07, $00, $00, $00, $00, $00   ; bg tile $1F
++    .byte $78, $F8, $78, $F8, $F8, $F0, $30, $18, $80, $80, $80, $00, $00, $00, $00, $00   ; bg tile $20
+     .byte $00, $00, $3F, $20, $2F, $28, $28, $28, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $21
+     .byte $00, $00, $FF, $00, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $22
+     .byte $00, $00, $FC, $04, $F4, $14, $14, $14, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $23
+@@ -119,35 +119,35 @@
+     .byte $00, $00, $CC, $78, $30, $78, $CC, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $6F
+     .byte $00, $00, $CC, $CC, $DC, $7C, $0C, $78, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $70
+     .byte $00, $00, $FC, $18, $30, $60, $FC, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $71
+-    .byte $00, $00, $00, $00, $00, $00, $03, $03, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $72
+-    .byte $0F, $0F, $3F, $3F, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $73
++    .byte $00, $00, $03, $03, $0F, $0F, $3F, $3F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $72
++    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $73
+     .byte $F0, $F0, $FC, $FC, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $74
+     .byte $00, $00, $00, $00, $00, $00, $C0, $C0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $75
+-    .byte $0F, $0F, $0F, $0F, $3F, $3F, $3F, $3F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $76
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $C0, $C0, $C0, $C0, $00, $00   ; bg tile $77
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $30, $30, $30, $30, $00, $00   ; bg tile $78
+-    .byte $F0, $F0, $F0, $F0, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $79
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7A
+-    .byte $FF, $FF, $FF, $FF, $C0, $C0, $FF, $FF, $00, $00, $00, $00, $3F, $3F, $00, $00   ; bg tile $7B
+-    .byte $FF, $FF, $FF, $FF, $3F, $3F, $FF, $FF, $00, $00, $00, $00, $C0, $C0, $00, $00   ; bg tile $7C
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7D
+-    .byte $3F, $3F, $0F, $0F, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7E
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7F
+-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $80
+-    .byte $FC, $FC, $F0, $F0, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $81
++    .byte $3F, $3F, $3F, $3F, $3C, $3C, $3C, $3C, $00, $00, $00, $00, $03, $03, $03, $03   ; bg tile $76
++    .byte $C0, $C0, $00, $00, $3F, $3F, $3F, $3F, $3F, $3F, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $77
++    .byte $3F, $3F, $03, $03, $C0, $C0, $C0, $C0, $C0, $C0, $FC, $FC, $FF, $FF, $FF, $FF   ; bg tile $78
++    .byte $C0, $C0, $C0, $C0, $C0, $C0, $C0, $C0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $79
++    .byte $3F, $3F, $3F, $3F, $0F, $0F, $0F, $0F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7A
++    .byte $00, $00, $C0, $C0, $FF, $FF, $FF, $FF, $FF, $FF, $3F, $3F, $00, $00, $00, $00   ; bg tile $7B
++    .byte $03, $03, $3F, $3F, $FF, $FF, $FF, $FF, $FC, $FC, $C0, $C0, $00, $00, $00, $00   ; bg tile $7C
++    .byte $C0, $C0, $C0, $C0, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7D
++    .byte $03, $03, $0F, $0F, $3C, $3C, $30, $30, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7E
++    .byte $FF, $FF, $3C, $3C, $3C, $3C, $30, $30, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $7F
++    .byte $FC, $FC, $FC, $FC, $3C, $3C, $30, $30, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $80
++    .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $81
+ 
+     .res $07E0, $00   ; pad to pattern table 1 ($1000)
+ 
+     ; --- pattern table 1: sprites ---
+-    .byte $07, $08, $10, $12, $10, $10, $08, $07, $00, $07, $0F, $0F, $0F, $0F, $07, $00   ; hero tile $00
+-    .byte $E0, $10, $08, $48, $08, $08, $10, $E0, $00, $E0, $F0, $F0, $F0, $F0, $E0, $00   ; hero tile $01
+-    .byte $1F, $3F, $3F, $3F, $1F, $18, $18, $18, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $02
+-    .byte $F8, $FC, $FC, $FC, $F8, $18, $18, $18, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $03
+-    .byte $07, $08, $10, $10, $10, $10, $08, $07, $00, $07, $0F, $0F, $0F, $0F, $07, $00   ; hero tile $04
+-    .byte $E0, $10, $08, $08, $08, $08, $10, $E0, $00, $E0, $F0, $F0, $F0, $F0, $E0, $00   ; hero tile $05
+-    .byte $1F, $3F, $3F, $3F, $1F, $18, $18, $18, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $06
+-    .byte $F8, $FC, $FC, $FC, $F8, $18, $18, $18, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $07
+-    .byte $0F, $10, $20, $20, $20, $20, $10, $0F, $00, $0F, $1F, $1F, $1F, $1F, $0F, $00   ; hero tile $08
+-    .byte $C0, $20, $10, $50, $10, $10, $20, $C0, $00, $C0, $E0, $E0, $F8, $E0, $C0, $00   ; hero tile $09
+-    .byte $1F, $3F, $3F, $3F, $1F, $1C, $1C, $1C, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $0A
+-    .byte $E0, $F0, $F0, $F0, $E0, $C0, $C0, $C0, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $0B
++    .byte $0F, $1F, $3F, $30, $30, $3F, $1F, $3F, $00, $00, $00, $0F, $0F, $00, $00, $00   ; hero tile $00
++    .byte $C0, $E0, $F0, $30, $30, $F0, $E0, $F0, $00, $00, $00, $C0, $C0, $00, $00, $00   ; hero tile $01
++    .byte $7F, $7F, $7F, $3F, $38, $38, $38, $18, $07, $07, $00, $00, $00, $00, $00, $00   ; hero tile $02
++    .byte $F0, $F0, $F0, $E0, $E0, $E0, $E0, $60, $80, $80, $00, $00, $00, $00, $00, $00   ; hero tile $03
++    .byte $0F, $1F, $3F, $3F, $3F, $3F, $1F, $3F, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $04
++    .byte $C0, $E0, $F0, $F0, $F0, $F0, $E0, $F0, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $05
++    .byte $7F, $7F, $7F, $3F, $38, $38, $38, $18, $07, $07, $00, $00, $00, $00, $00, $00   ; hero tile $06
++    .byte $F0, $F0, $F0, $E0, $E0, $E0, $E0, $60, $80, $80, $00, $00, $00, $00, $00, $00   ; hero tile $07
++    .byte $0F, $1F, $3F, $3C, $3C, $3F, $1F, $3F, $00, $00, $00, $03, $03, $00, $00, $00   ; hero tile $08
++    .byte $C0, $E0, $E0, $20, $20, $E0, $C0, $C0, $00, $00, $00, $C0, $C0, $00, $00, $00   ; hero tile $09
++    .byte $7F, $7F, $7F, $3F, $3C, $3C, $3C, $1C, $0E, $0E, $00, $00, $00, $00, $00, $00   ; hero tile $0A
++    .byte $80, $80, $00, $00, $C0, $C0, $C0, $40, $00, $00, $00, $00, $00, $00, $00, $00   ; hero tile $0B
+diff --git a/src/main.s b/src/main.s
+index 3f42f5a..cdbff21 100644
+--- a/src/main.s
++++ b/src/main.s
+@@ -2695,13 +2695,13 @@ slot_dy:
+ ; ----------------------------------------------------------------------------
+ .segment "RODATA"
+ pal_field:
+-    ; Background palettes:
+-    .byte $0F, $1A, $2A, $07   ; 0: ground  - greens + brown (grass/tree/path/wall)
+-    .byte $0F, $0C, $11, $21   ; 1: water   - teal/blue/light blue
+-    .byte $0F, $11, $27, $30   ; 2: NPC     - blue robe, tan skin, white
+-    .byte $0F, $30, $0F, $16   ; 3: window  - white paper, black ink
+-    ; Sprite palettes (seeded for later steps):
+-    .byte $0F, $16, $27, $30
++    ; Background palettes (space-station reskin):
++    .byte $0F, $00, $10, $30   ; 0: deck    - steel grays (floor/walls/crates)
++    .byte $0F, $0C, $1C, $30   ; 1: hazard  - glowing cyan plasma
++    .byte $0F, $1C, $2C, $30   ; 2: NPC     - teal/cyan droid + white lights
++    .byte $0F, $30, $0F, $16   ; 3: window  - white ink on black
++    ; Sprite palettes: 0 = astronaut (white suit, blue visor, orange trim).
++    .byte $0F, $30, $11, $27
+     .byte $0F, $0C, $11, $30
+     .byte $0F, $1A, $2A, $30
+     .byte $0F, $0F, $30, $0F
+@@ -2710,8 +2710,8 @@ pal_battle:
+     ; Battle backdrop = black ($0F): the classic JRPG arena, and the color the
+     ; text box needs (the box's black is value 0 = the backdrop). Every color-0
+     ; entry is $0F so the $3F1x->$3F0x mirror can't clobber the backdrop.
+-    .byte $0F, $0F, $10, $30   ; 0: blank screen
+-    .byte $0F, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
++    .byte $0F, $0F, $10, $30   ; 0: blank screen (black space void)
++    .byte $0F, $19, $2A, $30   ; 1: enemy - green alien body, light green, white
+     .byte $0F, $0F, $10, $30
+     .byte $0F, $30, $0F, $16   ; 3: window - black paper, white ink
+     .byte $0F, $16, $27, $30
+diff --git a/src/messages.s b/src/messages.s
+index 3abbc26..4671838 100644
+--- a/src/messages.s
++++ b/src/messages.s
+@@ -12,24 +12,25 @@ msg_table:
+     .word msg_NOBODY
+ 
+ msg_NPC_GREETING:
+-    .byte $45, $60, $00, $70, $66, $6C, $2D, $FE, $FE, $FE, $FD, $54, $5C, $63, $5A, $66
+-    .byte $64, $5C, $00, $6B, $66, $00, $6B, $5F, $5C, $00, $6E, $66, $69, $63, $5B, $2D
+-    .byte $FE, $FE, $FE, $FF
++    .byte $45, $60, $00, $6B, $5F, $5C, $69, $5C, $2F, $00, $69, $5C, $5A, $69, $6C, $60
++    .byte $6B, $2D, $FE, $FE, $FE, $FD, $54, $5C, $63, $5A, $66, $64, $5C, $00, $6B, $66
++    .byte $00, $6B, $5F, $5C, $00, $6A, $6B, $58, $6B, $60, $66, $65, $31, $FE, $FE, $FE
++    .byte $FF
+ 
+ msg_SLIME_APPEARS:
+-    .byte $3E, $00, $50, $63, $60, $64, $5C, $00, $5B, $69, $58, $6E, $6A, $00, $65, $5C
+-    .byte $58, $69, $2D, $FE, $FE, $FE, $FF
++    .byte $3E, $65, $00, $3E, $63, $60, $5C, $65, $00, $5B, $69, $60, $5D, $6B, $6A, $00
++    .byte $5A, $63, $66, $6A, $5C, $2D, $FE, $FE, $FE, $FF
+ 
+ msg_SLIME_DEFEATED:
+-    .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $60, $6A, $00, $5B, $5C, $5D
+-    .byte $5C, $58, $6B, $5C, $5B, $2D, $FE, $FE, $FE, $FF
++    .byte $51, $5F, $5C, $00, $3E, $63, $60, $5C, $65, $00, $60, $6A, $00, $5B, $5C, $6A
++    .byte $6B, $69, $66, $70, $5C, $5B, $2D, $FE, $FE, $FE, $FF
+ 
+ msg_NOBODY:
+     .byte $51, $5F, $5C, $69, $5C, $00, $60, $6A, $00, $65, $66, $00, $66, $65, $5C, $00
+     .byte $6B, $5F, $5C, $69, $5C, $31, $FE, $FE, $FE, $FF
+ 
+ frag_DMG_PRE:
+-    .byte $51, $5F, $5C, $00, $50, $63, $60, $64, $5C, $00, $6B, $58, $62, $5C, $6A, $00
++    .byte $51, $5F, $5C, $00, $3E, $63, $60, $5C, $65, $00, $6B, $58, $62, $5C, $6A, $00
+     .byte $FF
+ 
+ frag_DMG_POST:
+@@ -42,10 +43,10 @@ frag_OPT_EQUIP:
+     .byte $42, $68, $6C, $60, $67, $FF
+ 
+ frag_WPN0:
+-    .byte $40, $63, $6C, $59, $FF
++    .byte $3F, $58, $6B, $66, $65, $FF
+ 
+ frag_WPN1:
+-    .byte $50, $6E, $66, $69, $5B, $FF
++    .byte $49, $58, $6A, $5C, $69, $FF
+ 
+ frag_LBL_ATK:
+     .byte $00, $00, $3E, $51, $48, $00, $FF
+diff --git a/tools/gen_assets.py b/tools/gen_assets.py
+index 4091632..a15c895 100644
+--- a/tools/gen_assets.py
++++ b/tools/gen_assets.py
+@@ -38,35 +38,45 @@ WATER = T_WATER
+ # ---------------------------------------------------------------------------
+ # Field tile art. '0'-'3' = color index within the tile's palette.
+ # ---------------------------------------------------------------------------
++# Space-station reskin. Same tile slots, same solidity (TREE/WALL/WATER solid),
++# rethemed art. Under field palette 0 (steel grays): 1=dark, 2=light gray,
++# 3=white. The "water" slot is a glowing hazard under palette 1.
+ TILES = {
+     T_BLANK: ["00000000"] * 8,
++    # FLOOR (deck plating): mid-gray panel with darker right/bottom seams + rivet.
+     T_GRASS: [
+-        "11112111", "11111111", "21111121", "11111111",
+-        "11211111", "11111111", "11111121", "21111111",
++        "22222221", "23222221", "22222221", "22222221",
++        "22222321", "22222221", "22222221", "11111111",
+     ],
++    # FLOOR INDICATOR LIGHT (walkable): a glowing diamond set in the deck.
+     T_FLOWER: [
+-        "11111111", "11122111", "11233211", "11232311",
+-        "11233211", "11122111", "11111111", "11111111",
++        "22222222", "22222222", "22233222", "22333322",
++        "22333322", "22233222", "22222222", "22222222",
+     ],
++    # WALKWAY PLATE (corridor, walkable): bright-edged floor tile, direction-agnostic.
+     T_PATH: [
+-        "33333333", "33133333", "33333313", "33333333",
+-        "31333333", "33333133", "33333333", "33313333",
++        "33333333", "32222223", "32222223", "32222223",
++        "32222223", "32222223", "32222223", "33333333",
+     ],
++    # SUPPLY CRATE (solid): boxed container with straps.
+     T_TREE: [
+-        "12222221", "22222222", "22322322", "22222222",
+-        "22322322", "22222222", "12333321", "11333311",
++        "33333333", "31111113", "31211213", "31222213",
++        "31222213", "31211213", "31111113", "33333333",
+     ],
++    # BULKHEAD WALL (solid): horizontal panel seams.
+     T_WALL: [
+-        "33333333", "33333333", "13131313", "33333333",
+-        "33333333", "31313131", "33333333", "33333333",
++        "33333333", "22222222", "22222222", "33333333",
++        "22222222", "22222222", "33333333", "22222222",
+     ],
++    # FLOOR VENT GRATE (walkable low decor): dark slots in the deck.
+     T_BUSH: [
+-        "11111111", "11222211", "12222221", "12222221",
+-        "12222221", "11222211", "11111111", "11111111",
++        "22222222", "21212121", "22222222", "21212121",
++        "22222222", "21212121", "22222222", "21212121",
+     ],
++    # ENERGY HAZARD (solid; palette 1, glowing): rippling plasma with sparkles.
+     T_WATER: [
+-        "11111111", "12211221", "11111111", "21122112",
+-        "11111111", "12211221", "11111111", "21122112",
++        "11211221", "12223212", "22122221", "11232112",
++        "12211223", "22122321", "11223122", "12212212",
+     ],
+ }
+ 
+@@ -75,60 +85,62 @@ TILES = {
+ # Three authored facings (down/up/side); "left" is the side art H-flipped at
+ # draw time. Value 0 = transparent. Sprite palette 0: 1=red, 2=tan, 3=white.
+ # ---------------------------------------------------------------------------
++# Astronaut. Sprite palette 0: 1 = white suit/helmet, 2 = blue visor,
++# 3 = orange life-support trim. Value 0 = transparent.
+ HERO_VIEWS = {
+     "down": [
+-        "0000011111100000",
+-        "0000122222210000",
+-        "0001222222221000",
+-        "0001223223221000",   # two eyes
+-        "0001222222221000",
+-        "0001222222221000",
+-        "0000122222210000",
+-        "0000011111100000",
+-        "0001111111111000",
+-        "0011111111111100",
+-        "0011111111111100",
+-        "0011111111111100",
+-        "0001111111111000",
+-        "0001100000011000",
+-        "0001100000011000",
+-        "0001100000011000",
+-    ],
+-    "up": [   # back of the head: no face
+-        "0000011111100000",
+-        "0000122222210000",
+-        "0001222222221000",
+-        "0001222222221000",
+-        "0001222222221000",
+-        "0001222222221000",
+-        "0000122222210000",
+-        "0000011111100000",
+-        "0001111111111000",
+-        "0011111111111100",
+-        "0011111111111100",
+-        "0011111111111100",
+-        "0001111111111000",
+-        "0001100000011000",
+-        "0001100000011000",
+-        "0001100000011000",
+-    ],
+-    "side": [   # profile, facing RIGHT: one eye and a nose on the right
+         "0000111111000000",
+-        "0001222222100000",
+-        "0012222222210000",
+-        "0012222223210000",   # eye toward the right
+-        "0012222222232000",   # nose bump
+-        "0012222222210000",
+-        "0001222222100000",
++        "0001111111100000",
++        "0011111111110000",
++        "0011222222110000",   # visor band
++        "0011222222110000",
++        "0011111111110000",
++        "0001111111100000",
++        "0011111111110000",   # shoulders
++        "0111133331110000",   # chest pack (orange)
++        "0111133331110000",
++        "0111111111110000",
++        "0011111111100000",
++        "0011100011100000",   # legs
++        "0011100011100000",
++        "0011100011100000",
++        "0001100001100000",
++    ],
++    "up": [   # back of the helmet: no visor
+         "0000111111000000",
+         "0001111111100000",
+         "0011111111110000",
+         "0011111111110000",
+         "0011111111110000",
++        "0011111111110000",
+         "0001111111100000",
+-        "0001110011000000",
+-        "0001110011000000",
+-        "0001110011000000",
++        "0011111111110000",
++        "0111133331110000",   # back pack
++        "0111133331110000",
++        "0111111111110000",
++        "0011111111100000",
++        "0011100011100000",
++        "0011100011100000",
++        "0011100011100000",
++        "0001100001100000",
++    ],
++    "side": [   # profile facing RIGHT: visor toward the right, pack on the back
++        "0000111111000000",
++        "0001111111100000",
++        "0011111111100000",
++        "0011112222100000",   # visor toward the right
++        "0011112222100000",
++        "0011111111100000",
++        "0001111111000000",
++        "0011111111000000",
++        "0111333110000000",   # pack on the back (left)
++        "0111333110000000",
++        "0111111100000000",
++        "0011111100000000",
++        "0011110011000000",   # legs
++        "0011110011000000",
++        "0011110011000000",
++        "0001110001000000",
+     ],
+ }
+ 
+@@ -138,60 +150,62 @@ HERO_VIEWS = {
+ # facings; "left" is mirrored from "side" by the tool (BG can't flip).
+ # 1=robe, 2=skin, 3=eyes/white.
+ # ---------------------------------------------------------------------------
++# Service droid, drawn as BACKGROUND tiles (palette 2). 1 = teal shell,
++# 2 = cyan plating, 3 = white eye/lights. Value 0 = backdrop (outline).
+ NPC_VIEWS = {
+     "down": [
+-        "0000111111100000",
+-        "0001122222110000",
+-        "0011222222211000",
+-        "0011233223211000",   # two eyes
+-        "0011222222211000",
+-        "0011222222211000",
+-        "0001122222110000",
++        "0000111111000000",   # dome
++        "0001122221100000",
++        "0011222222110000",
++        "0011233332110000",   # eye band
++        "0011222222110000",
+         "0011111111110000",
+-        "0111111111111000",
+-        "0111111111111000",
+-        "0111111111111000",
+-        "0111111111111000",
++        "0011111111110000",
++        "0111111111111000",   # body
++        "0111122221111000",
++        "0111133331111000",   # panel
++        "0111122221111000",
+         "0111111111111000",
+         "0111111111111000",
+         "0011111111110000",
+-        "0001111111100000",
++        "0011000000110000",   # legs
++        "0110000000011000",
+     ],
+-    "up": [   # back of the hood: no face
+-        "0000111111100000",
+-        "0001122222110000",
+-        "0011222222211000",
+-        "0011222222211000",
+-        "0011222222211000",
+-        "0011222222211000",
+-        "0001122222110000",
++    "up": [   # back: no eye band
++        "0000111111000000",
++        "0001122221100000",
++        "0011222222110000",
++        "0011222222110000",
++        "0011222222110000",
++        "0011111111110000",
+         "0011111111110000",
+         "0111111111111000",
+         "0111111111111000",
+-        "0111111111111000",
++        "0111133331111000",
+         "0111111111111000",
+         "0111111111111000",
+         "0111111111111000",
+         "0011111111110000",
+-        "0001111111100000",
++        "0011000000110000",
++        "0110000000011000",
+     ],
+-    "side": [   # profile robe, facing RIGHT
+-        "0000111111000000",
+-        "0001222222100000",
+-        "0012222222100000",
+-        "0012222232100000",   # eye toward the right
+-        "0012222222320000",   # nose bump
+-        "0012222222100000",
+-        "0001222222100000",
+-        "0001111111100000",
+-        "0011111111110000",
+-        "0011111111110000",
+-        "0011111111110000",
+-        "0011111111110000",
+-        "0011111111110000",
+-        "0011111111110000",
+-        "0001111111100000",
++    "side": [   # profile facing RIGHT
+         "0000111111000000",
++        "0001122211000000",
++        "0011222221000000",
++        "0011233321000000",   # eye toward the right
++        "0011222221000000",
++        "0011111111000000",
++        "0011111111000000",
++        "0111111111100000",
++        "0111122211100000",
++        "0111133311100000",
++        "0111122211100000",
++        "0111111111100000",
++        "0111111111100000",
++        "0011111111000000",
++        "0011000011000000",
++        "0110000011000000",
+     ],
+ }
+ 
+@@ -299,13 +313,13 @@ MSG_NEWLINE, MSG_PAGE, MSG_END = 0xFE, 0xFD, 0xFF
+ TEXT_W, TEXT_H = 30, 4   # interior width / lines per page
+ 
+ MESSAGES = [
+-    # name, text
++    # name, text  (symbol names are kept; only the displayed text is rethemed)
+     # "\f" forces a page break (press A to advance to the next page).
+     ("NPC_GREETING",
+-     "Hi you!\f"
+-     "Welcome to the world!"),
+-    ("SLIME_APPEARS", "A Slime draws near!"),
+-    ("SLIME_DEFEATED", "The Slime is defeated!"),
++     "Hi there, recruit!\f"
++     "Welcome to the station."),
++    ("SLIME_APPEARS", "An Alien drifts close!"),
++    ("SLIME_DEFEATED", "The Alien is destroyed!"),
+     ("NOBODY", "There is no one there."),
+ ]
+ 
+@@ -313,13 +327,13 @@ MESSAGES = [
+ #   <DMG_PRE><number><DMG_POST>  e.g. "The Slime takes 6 damage!"
+ # Emitted as $FF-terminated tile streams the runtime concatenates.
+ FRAGMENTS = [
+-    ("DMG_PRE", "The Slime takes "),
++    ("DMG_PRE", "The Alien takes "),
+     ("DMG_POST", " damage!"),
+     # menu labels
+     ("OPT_TALK", "Talk"),
+     ("OPT_EQUIP", "Equip"),
+-    ("WPN0", "Club"),
+-    ("WPN1", "Sword"),
++    ("WPN0", "Baton"),
++    ("WPN1", "Laser"),
+     ("LBL_ATK", "  ATK "),
+     ("LBL_POWER", "Power: "),
+ ]
+@@ -330,23 +344,25 @@ FRAGMENTS = [
+ # backdrop shows through, so the blob's silhouette blends cleanly.
+ #   1 = body, 2 = shading, 3 = eyes/mouth (white).
+ # ---------------------------------------------------------------------------
++# One-eyed alien. Battle palette 1: 1 = green body, 2 = light-green shading,
++# 3 = white eye. Value 0 = transparent (the black space void shows through).
+ ENEMY16 = [
+-    "0000001111000000",
+-    "0000011111100000",
+-    "0000111111110000",
+-    "0001111111111000",
+-    "0011111111111100",
+-    "0011311113111100",
+-    "0111311113111110",
+-    "0111111111111110",
+-    "1111111111111111",
+-    "1111111111111111",
+-    "1111122221111111",
+-    "1111111111111111",
+-    "0111111111111110",
+-    "0011111111111100",
+-    "0000111111110000",
+-    "0000000000000000",
++    "0000111111000000",
++    "0001111111100000",
++    "0011111111110000",
++    "0111111111111000",
++    "0111122221111000",   # brow ridge
++    "0111222222211000",
++    "0112233332221000",   # eye (white) with pupil
++    "0112233332221000",
++    "0111222222211000",
++    "0111122221111000",
++    "0011111111110000",
++    "0011111111110000",
++    "0001111111100000",
++    "0011011011100000",   # tentacle hints
++    "0110011001100000",
++    "0100010001000000",
+ ]
+ 
+ # Where the NPC stands, in 16px grid cells (must match NPC_GX/GY in main.s).
+@@ -781,8 +797,8 @@ def main():
+             f.write(f"MSG_{name} = {i}\n")
+ 
+     # console preview (| marks the screen seam at metatile col 16)
+-    glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "T",
+-              T_WALL: "#", T_BUSH: "o", T_WATER: "~"}
++    glyphs = {T_GRASS: ".", T_FLOWER: ",", T_PATH: ":", T_TREE: "X",   # X=crate
++              T_WALL: "#", T_BUSH: "o", T_WATER: "~"}                  # ~=hazard
+     print("World preview, %dx%d metatiles (N = NPC, facing %s):" % (WM, HM, NPC_FACING))
+     for y in range(HM):
+         line = ""
+-- 
+2.43.0
+

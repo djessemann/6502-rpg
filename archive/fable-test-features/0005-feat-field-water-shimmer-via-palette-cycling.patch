@@ -1,0 +1,74 @@
+From 417ac6cf597a8f5d0164563e5609e5515c6448d7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 1 Jul 2026 21:06:22 +0000
+Subject: [PATCH 5/5] feat(field): water shimmer via palette cycling
+
+WaterTick (GS_FIELD only) queues a 2-byte palette packet every 16 frames,
+toggling BG palette 1's blues between blue/deep-blue and teal/navy. The
+battle palette reuses those slots for the enemy, so the tick never runs
+outside the field state.
+---
+ src/main.s | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+
+diff --git a/src/main.s b/src/main.s
+index 804d443..fa23fdc 100644
+--- a/src/main.s
++++ b/src/main.s
+@@ -1016,6 +1016,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+ 
+     ; --- GS_FIELD ---
+     jsr UpdateHero
++    jsr WaterTick       ; shimmer the water palette (field only)
+ 
+     ; Interactions/encounters only resolve when the hero is grid-aligned.
+     ldx #HERO
+@@ -1392,6 +1393,45 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
+     rts
+ .endproc
+ 
++; ----------------------------------------------------------------------------
++; WaterTick — animate the water: every 16 frames queue a 2-byte palette packet
++; cycling BG palette 1's two blues ($3F05-$3F06) through a 4-phase table.
++; Runs only in GS_FIELD, where the VRAM buffer is otherwise idle (the battle
++; palette reuses those slots for the enemy, so it must not run there).
++; ----------------------------------------------------------------------------
++.proc WaterTick
++    lda frame_count
++    and #$0F
++    beq :+
++    rts
++:   lda frame_count     ; phase = (frame_count / 16) mod 4
++    lsr a
++    lsr a
++    lsr a
++    lsr a
++    and #$03
++    tax
++    lda #$3F
++    sta VBUF
++    lda #$05
++    sta VBUF+1
++    lda #2
++    sta VBUF+2
++    lda water_c1,x
++    sta VBUF+3
++    lda water_c2,x
++    sta VBUF+4
++    rts
++.endproc
++
++.segment "RODATA"
++water_c1:               ; light-blue wave color per phase
++    .byte $21, $2C, $21, $2C
++water_c2:               ; deep-blue base color per phase
++    .byte $11, $01, $11, $01
++
++.segment "CODE"
++
+ ; SetMessage — point msg_ptr at message id A (index into msg_table).
+ .proc SetMessage
+     asl a
+-- 
+2.43.0
+

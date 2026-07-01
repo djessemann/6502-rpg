@@ -7,9 +7,9 @@ window tilemap. NOT part of the `make` build: it emits committed .s files
 then commit the generated .s.
 
 Tiles are 8x8, pixel values 0-3 selecting a color within the active palette.
-The attribute table is palette-aware: water -> palette 1, NPC -> palette 2,
-everything else -> palette 0. The text window region is switched to palette 3
-at runtime.
+The attribute table is palette-aware: water -> palette 1, NPC/flowers ->
+palette 2, walls -> palette 3 (the window palette), everything else ->
+palette 0. The text window region is switched to palette 3 at runtime.
 """
 
 import os
@@ -37,36 +37,145 @@ WATER = T_WATER
 
 # ---------------------------------------------------------------------------
 # Field tile art. '0'-'3' = color index within the tile's palette.
+# Terrain is authored as TRUE 16x16 metatiles (one 16px world cell each) and
+# split into its four CHR subtiles. Palette assignment per terrain is in
+# cell_pal(): ground/plants -> palette 0 (greens + brown), water -> palette 1
+# (blues + white), flowers/NPC -> palette 2 (green + gold + red), walls ->
+# palette 3 (window palette: white/red/tan brick).
 # ---------------------------------------------------------------------------
-TILES = {
-    T_BLANK: ["00000000"] * 8,
+BLANK8 = ["00000000"] * 8
+
+TILES16 = {
+    # palette 0: 0=black outline, 1=light green, 2=dark green, 3=brown
     T_GRASS: [
-        "11112111", "11111111", "21111121", "11111111",
-        "11211111", "11111111", "11111121", "21111111",
-    ],
-    T_FLOWER: [
-        "11111111", "11122111", "11233211", "11232311",
-        "11233211", "11122111", "11111111", "11111111",
-    ],
-    T_PATH: [
-        "33333333", "33133333", "33333313", "33333333",
-        "31333333", "33333133", "33333333", "33313333",
+        "1111111111111111",
+        "1111111111111111",
+        "1112211111111111",
+        "1111211111111111",
+        "1111111111111111",
+        "1111111111122111",
+        "1111111111112111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111122111111111",
+        "1111112111111111",
+        "1111111111111111",
+        "1111111111111221",
+        "1211111111111121",
+        "1121111111111111",
+        "1111111111111111",
     ],
     T_TREE: [
-        "12222221", "22222222", "22322322", "22222222",
-        "22322322", "22222222", "12333321", "11333311",
-    ],
-    T_WALL: [
-        "33333333", "33333333", "13131313", "33333333",
-        "33333333", "31313131", "33333333", "33333333",
+        "1111100000011111",
+        "1111022222201111",
+        "1110222222220111",
+        "1102222122222011",
+        "1022221222222201",
+        "1022222222122201",
+        "1022122222212201",
+        "1022212222222201",
+        "1102222122222011",
+        "1110222222220111",
+        "1111002222001111",
+        "1111110330111111",
+        "1111110330111111",
+        "1111110330111111",
+        "1111103333011111",
+        "1111111111111111",
     ],
     T_BUSH: [
-        "11111111", "11222211", "12222221", "12222221",
-        "12222221", "11222211", "11111111", "11111111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111100001111111",
+        "1111022220011111",
+        "1110222222201111",
+        "1102212222220111",
+        "1102222212222011",
+        "1022122222122201",
+        "1022221222222201",
+        "1102222222122011",
+        "1110222122220111",
+        "1111022222201111",
+        "1111100000011111",
+        "1111111111111111",
+        "1111111111111111",
     ],
+    T_PATH: [
+        "3333333333333333",
+        "3333033333333333",
+        "3333333333330333",
+        "3333333333333333",
+        "3033333333333333",
+        "3333333303333333",
+        "3333333333333333",
+        "3333333333333303",
+        "3333333333333333",
+        "3303333333333333",
+        "3333333330333333",
+        "3333333333333333",
+        "3333033333333333",
+        "3333333333333033",
+        "3333333333333333",
+        "3033333333333333",
+    ],
+    # palette 1: 0=black, 1=light blue, 2=deep blue, 3=white (sparkle)
     T_WATER: [
-        "11111111", "12211221", "11111111", "21122112",
-        "11111111", "12211221", "11111111", "21122112",
+        "1111111111111111",
+        "1122111111221111",
+        "1111111111111111",
+        "1111111221111111",
+        "1131111111111311",
+        "1111111111111111",
+        "1221111111112211",
+        "1111112211111111",
+        "1111111111111111",
+        "1122111111122111",
+        "1111111111111111",
+        "1111122111111111",
+        "1111111111131111",
+        "1221111111111111",
+        "1111111112211111",
+        "1111111111111111",
+    ],
+    # palette 2: 0=black, 1=green (grass), 2=gold, 3=red
+    T_FLOWER: [
+        "1111111111111111",
+        "1113311111111111",
+        "1132231111111111",
+        "1132231111111111",
+        "1113311111111111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111111111111111",
+        "1111111111331111",
+        "1111111113223111",
+        "1111111113223111",
+        "1111111111331111",
+        "1111111111111111",
+        "1211111111111111",
+        "1111111111111111",
+    ],
+    # palette 3 (window palette): 0=black mortar, 1=white glint, 2=red shadow,
+    # 3=tan brick
+    T_WALL: [
+        "1333333033333330",
+        "3333333033333330",
+        "2222222022222220",
+        "0000000000000000",
+        "3330133333303333",
+        "3330333333303333",
+        "2220222222202222",
+        "0000000000000000",
+        "3333333013333330",
+        "3333333033333330",
+        "2222222022222220",
+        "0000000000000000",
+        "3330333333303333",
+        "3330333333303333",
+        "2220222222202222",
+        "0000000000000000",
     ],
 }
 
@@ -133,65 +242,65 @@ HERO_VIEWS = {
 }
 
 # ---------------------------------------------------------------------------
-# NPC: 16x16 drawn as BACKGROUND tiles (palette 2). Value 0 renders as the
-# universal backdrop ($0F black) so it reads as an outline. Same three authored
-# facings; "left" is mirrored from "side" by the tool (BG can't flip).
-# 1=robe, 2=skin, 3=eyes/white.
+# NPC: 16x16 drawn as BACKGROUND tiles (palette 2). Value 1 is the grass green,
+# so the villager stands on grass instead of a black square; value 0 is the
+# black outline (the backdrop). Same three authored facings; "left" is mirrored
+# from "side" by the tool (BG can't flip). 2=skin (gold), 3=robe (red).
 # ---------------------------------------------------------------------------
 NPC_VIEWS = {
     "down": [
-        "0000111111100000",
-        "0001122222110000",
-        "0011222222211000",
-        "0011233223211000",   # two eyes
-        "0011222222211000",
-        "0011222222211000",
-        "0001122222110000",
-        "0011111111110000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0011111111110000",
-        "0001111111100000",
+        "1111100001111111",   # pointed hood tip
+        "1111033333011111",
+        "1110333333330111",
+        "1103333333333011",
+        "1103333333333011",
+        "1103322222233011",   # face band under the hood rim
+        "1103320220233011",   # two eyes
+        "1103322222233011",
+        "1103332222333011",
+        "1033333333333301",   # shoulders
+        "1033233333323301",   # hands at the sides
+        "1033333333333301",
+        "1033333333333301",
+        "1103333333333011",
+        "1110333333330111",
+        "1111000000001111",
     ],
     "up": [   # back of the hood: no face
-        "0000111111100000",
-        "0001122222110000",
-        "0011222222211000",
-        "0011222222211000",
-        "0011222222211000",
-        "0011222222211000",
-        "0001122222110000",
-        "0011111111110000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0111111111111000",
-        "0011111111110000",
-        "0001111111100000",
+        "1111100001111111",
+        "1111033333011111",
+        "1110333333330111",
+        "1103333333333011",
+        "1103333333333011",
+        "1103333333333011",
+        "1103333333333011",
+        "1103333333333011",
+        "1103333333333011",
+        "1033333333333301",
+        "1033333333333301",
+        "1033333333333301",
+        "1033333333333301",
+        "1103333333333011",
+        "1110333333330111",
+        "1111000000001111",
     ],
     "side": [   # profile robe, facing RIGHT
-        "0000111111000000",
-        "0001222222100000",
-        "0012222222100000",
-        "0012222232100000",   # eye toward the right
-        "0012222222320000",   # nose bump
-        "0012222222100000",
-        "0001222222100000",
-        "0001111111100000",
-        "0011111111110000",
-        "0011111111110000",
-        "0011111111110000",
-        "0011111111110000",
-        "0011111111110000",
-        "0011111111110000",
-        "0001111111100000",
-        "0000111111000000",
+        "1111100001111111",
+        "1111033333011111",
+        "1110333333330111",
+        "1103333333333011",
+        "1103333333333011",
+        "1103333322220111",   # face toward the right
+        "1103333322022011",   # eye + nose bump
+        "1103333322220111",
+        "1103333222233011",
+        "1033333333333301",
+        "1033333333323301",   # one hand in front
+        "1033333333333301",
+        "1033333333333301",
+        "1103333333333011",
+        "1110333333330111",
+        "1111000000001111",
     ],
 }
 
@@ -406,38 +515,38 @@ def split_grid(block, n):
     return tiles
 
 
-# Dragon-Warrior-style frame: black box with a white double line near the edge,
-# rounded corners. '#' = white (value 1), '.' = black (value 0). Only the
+# Dragon-Quest-style frame: black box with a thick (2px) white line and
+# bevel-rounded corners. '#' = white (value 1), '.' = black (value 0). Only the
 # top-left corner and the top/left edges are authored; the rest are mirrored.
 WIN_TL_ART = [
     "........",
     "........",
+    "....####",
     "..######",
-    "..#.....",
-    "..#.####",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
 ]
 WIN_T_ART = [
     "........",
     "........",
     "########",
-    "........",
     "########",
+    "........",
     "........",
     "........",
     "........",
 ]
 WIN_L_ART = [
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
-    "..#.#...",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
+    "..##....",
 ]
 WIN_FILL_ART = ["........"] * 8
 
@@ -517,17 +626,23 @@ def main():
     src = os.path.join(here, "src")
 
     # --- assemble the ordered background tile table (16x16 metatiles) ---
-    # Terrain is authored as 8x8 art, pixel-doubled to 16x16 and split into the
-    # four CHR subtiles (TL,TR,BL,BR) of one metatile. The hero and NPC are
-    # already 16x16. Window/font/enemy tiles stay 8x8 (used by the text box).
-    bg = {0: TILES[T_BLANK]}        # tile $00 = blank (palette-independent)
+    # Terrain, hero and NPC are authored as true 16x16 art, split into the four
+    # CHR subtiles (TL,TR,BL,BR) of one metatile. Window/font/enemy tiles stay
+    # 8x8 (used by the text box).
+    for t, art in TILES16.items():
+        assert len(art) == 16 and all(len(r) == 16 for r in art), f"tile {t}"
+    for views in (HERO_VIEWS, NPC_VIEWS):
+        for name, art in views.items():
+            assert len(art) == 16 and all(len(r) == 16 for r in art), name
+
+    bg = {0: BLANK8}                # tile $00 = blank (palette-independent)
     nid = 1
 
     TERRAIN = [T_GRASS, T_FLOWER, T_PATH, T_TREE, T_WALL, T_BUSH, T_WATER]
     meta_terrain = {}
     for t in TERRAIN:
         ids = []
-        for sub in split16(double(TILES[t])):
+        for sub in split16(TILES16[t]):
             bg[nid] = sub
             ids.append(nid)
             nid += 1
@@ -651,7 +766,14 @@ def main():
     def cell_pal(mx, my):
         if (mx, my) == (NPC_GX, NPC_GY):
             return 2
-        return 1 if world[my][mx] == T_WATER else 0
+        t = world[my][mx]
+        if t == T_WATER:
+            return 1
+        if t == T_FLOWER:
+            return 2          # deco palette: gold/red blossoms
+        if t == T_WALL:
+            return 3          # window palette: white/red/tan brick
+        return 0
 
     # worldtiles: the whole world as 8px tiles, 60 tile-rows x 64 tile-cols,
     # row-major. Within each tile-row the first 32 cols are the LEFT nametable

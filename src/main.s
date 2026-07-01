@@ -2696,10 +2696,10 @@ slot_dy:
 .segment "RODATA"
 pal_field:
     ; Background palettes:
-    .byte $0F, $1A, $2A, $07   ; 0: ground  - greens + brown (grass/tree/path/wall)
-    .byte $0F, $0C, $11, $21   ; 1: water   - teal/blue/light blue
-    .byte $0F, $11, $27, $30   ; 2: NPC     - blue robe, tan skin, white
-    .byte $0F, $30, $0F, $16   ; 3: window  - white paper, black ink
+    .byte $0F, $29, $1A, $17   ; 0: ground  - light/dark green + brown
+    .byte $0F, $21, $11, $30   ; 1: water   - light blue, deep blue, white
+    .byte $0F, $29, $27, $16   ; 2: deco    - grass green, gold, red (NPC/flowers)
+    .byte $0F, $30, $16, $27   ; 3: window  - white ink, red + tan (brick walls)
     ; Sprite palettes (seeded for later steps):
     .byte $0F, $16, $27, $30
     .byte $0F, $0C, $11, $30

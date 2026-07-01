@@ -6,47 +6,47 @@
 .segment "CHARS"
     ; --- pattern table 0: background ---
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $00
-    .byte $FF, $FF, $FF, $FF, $3F, $3F, $FF, $FF, $00, $00, $00, $00, $C0, $C0, $00, $00   ; bg tile $01
-    .byte $3F, $3F, $FF, $FF, $F3, $F3, $FF, $FF, $C0, $C0, $00, $00, $0C, $0C, $00, $00   ; bg tile $02
-    .byte $F3, $F3, $FF, $FF, $FF, $FF, $3F, $3F, $0C, $0C, $00, $00, $00, $00, $C0, $C0   ; bg tile $03
-    .byte $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $00, $00, $00, $00, $0C, $0C, $00, $00   ; bg tile $04
-    .byte $FF, $FF, $FC, $FC, $F3, $F3, $F3, $F3, $00, $00, $03, $03, $0F, $0F, $0F, $0F   ; bg tile $05
-    .byte $FF, $FF, $3F, $3F, $CF, $CF, $3F, $3F, $00, $00, $C0, $C0, $F0, $F0, $F0, $F0   ; bg tile $06
-    .byte $F3, $F3, $FC, $FC, $FF, $FF, $FF, $FF, $0F, $0F, $03, $03, $00, $00, $00, $00   ; bg tile $07
-    .byte $CF, $CF, $3F, $3F, $FF, $FF, $FF, $FF, $F0, $F0, $C0, $C0, $00, $00, $00, $00   ; bg tile $08
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF   ; bg tile $09
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF   ; bg tile $0A
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CF, $CF, $FF, $FF, $FF, $FF, $FC, $FC   ; bg tile $0B
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CF, $CF, $FF, $FF, $FF, $FF   ; bg tile $0C
-    .byte $C0, $C0, $00, $00, $0C, $0C, $00, $00, $3F, $3F, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0D
-    .byte $03, $03, $00, $00, $30, $30, $00, $00, $FC, $FC, $FF, $FF, $FF, $FF, $FF, $FF   ; bg tile $0E
-    .byte $0C, $0C, $00, $00, $CF, $CF, $FF, $FF, $FF, $FF, $FF, $FF, $3F, $3F, $0F, $0F   ; bg tile $0F
-    .byte $30, $30, $00, $00, $F3, $F3, $FF, $FF, $FF, $FF, $FF, $FF, $FC, $FC, $F0, $F0   ; bg tile $10
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $33, $33, $FF, $FF   ; bg tile $11
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $33, $33, $FF, $FF   ; bg tile $12
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CC, $CC, $FF, $FF, $FF, $FF   ; bg tile $13
-    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $CC, $CC, $FF, $FF, $FF, $FF   ; bg tile $14
-    .byte $FF, $FF, $F0, $F0, $C0, $C0, $C0, $C0, $00, $00, $0F, $0F, $3F, $3F, $3F, $3F   ; bg tile $15
-    .byte $FF, $FF, $0F, $0F, $03, $03, $03, $03, $00, $00, $F0, $F0, $FC, $FC, $FC, $FC   ; bg tile $16
-    .byte $C0, $C0, $F0, $F0, $FF, $FF, $FF, $FF, $3F, $3F, $0F, $0F, $00, $00, $00, $00   ; bg tile $17
-    .byte $03, $03, $0F, $0F, $FF, $FF, $FF, $FF, $FC, $FC, $F0, $F0, $00, $00, $00, $00   ; bg tile $18
-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $19
-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1A
-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1B
-    .byte $FF, $FF, $C3, $C3, $FF, $FF, $3C, $3C, $00, $00, $3C, $3C, $00, $00, $C3, $C3   ; bg tile $1C
-    .byte $0F, $18, $30, $36, $30, $30, $18, $3F, $00, $07, $0F, $0F, $0F, $0F, $07, $00   ; bg tile $1D
-    .byte $E0, $30, $18, $58, $18, $18, $30, $F0, $00, $C0, $E0, $E0, $E0, $E0, $C0, $00   ; bg tile $1E
-    .byte $7F, $7F, $7F, $7F, $7F, $7F, $3F, $1F, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $1F
-    .byte $F8, $F8, $F8, $F8, $F8, $F8, $F0, $E0, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $20
-    .byte $00, $00, $3F, $20, $2F, $28, $28, $28, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $21
-    .byte $00, $00, $FF, $00, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $22
-    .byte $00, $00, $FC, $04, $F4, $14, $14, $14, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $23
-    .byte $28, $28, $28, $28, $28, $28, $28, $28, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $24
+    .byte $FF, $FF, $E7, $F7, $FF, $FF, $FF, $FF, $00, $00, $18, $08, $00, $00, $00, $00   ; bg tile $01
+    .byte $FF, $FF, $FF, $FF, $FF, $E7, $F7, $FF, $00, $00, $00, $00, $00, $18, $08, $00   ; bg tile $02
+    .byte $FF, $F9, $FD, $FF, $FF, $BF, $DF, $FF, $00, $06, $02, $00, $00, $40, $20, $00   ; bg tile $03
+    .byte $FF, $FF, $FF, $FF, $F9, $FD, $FF, $FF, $00, $00, $00, $00, $06, $02, $00, $00   ; bg tile $04
+    .byte $FF, $FF, $E7, $E7, $FF, $FF, $FF, $FF, $00, $18, $3C, $3C, $18, $00, $00, $00   ; bg tile $05
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $06
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $BF, $FF, $00, $00, $00, $00, $00, $00, $40, $00   ; bg tile $07
+    .byte $FF, $FF, $CF, $CF, $FF, $FF, $FF, $FF, $00, $30, $78, $78, $30, $00, $00, $00   ; bg tile $08
+    .byte $FF, $F7, $FF, $FF, $BF, $FF, $FF, $FF, $FF, $F7, $FF, $FF, $BF, $FF, $FF, $FF   ; bg tile $09
+    .byte $FF, $FF, $F7, $FF, $FF, $7F, $FF, $FD, $FF, $FF, $F7, $FF, $FF, $7F, $FF, $FD   ; bg tile $0A
+    .byte $FF, $DF, $FF, $FF, $F7, $FF, $FF, $BF, $FF, $DF, $FF, $FF, $F7, $FF, $FF, $BF   ; bg tile $0B
+    .byte $FF, $FF, $BF, $FF, $FF, $FB, $FF, $FF, $FF, $FF, $BF, $FF, $FF, $FB, $FF, $FF   ; bg tile $0C
+    .byte $F8, $F0, $E0, $C1, $82, $80, $88, $84, $00, $07, $0F, $1E, $3D, $3F, $37, $3B   ; bg tile $0D
+    .byte $1F, $0F, $07, $03, $01, $21, $11, $01, $00, $E0, $F0, $F8, $FC, $DC, $EC, $FC   ; bg tile $0E
+    .byte $C1, $E0, $F0, $FD, $FD, $FD, $FB, $FF, $1E, $0F, $03, $01, $01, $01, $03, $00   ; bg tile $0F
+    .byte $03, $07, $0F, $BF, $BF, $BF, $DF, $FF, $F8, $F0, $C0, $80, $80, $80, $C0, $00   ; bg tile $10
+    .byte $FE, $FE, $00, $00, $EF, $EF, $00, $00, $7E, $FE, $FE, $00, $E7, $EF, $EF, $00   ; bg tile $11
+    .byte $FE, $FE, $00, $00, $EF, $EF, $00, $00, $FE, $FE, $FE, $00, $EF, $EF, $EF, $00   ; bg tile $12
+    .byte $FE, $FE, $00, $00, $EF, $EF, $00, $00, $FE, $FE, $FE, $00, $EF, $EF, $EF, $00   ; bg tile $13
+    .byte $FE, $FE, $00, $00, $EF, $EF, $00, $00, $7E, $FE, $FE, $00, $EF, $EF, $EF, $00   ; bg tile $14
+    .byte $FF, $FF, $FF, $F8, $F0, $E0, $C4, $C0, $00, $00, $00, $00, $07, $0F, $1B, $1F   ; bg tile $15
+    .byte $FF, $FF, $FF, $7F, $1F, $0F, $07, $83, $00, $00, $00, $00, $80, $E0, $F0, $78   ; bg tile $16
+    .byte $88, $82, $C0, $E1, $F0, $F8, $FF, $FF, $37, $3D, $1F, $0E, $07, $00, $00, $00   ; bg tile $17
+    .byte $21, $01, $23, $07, $0F, $1F, $FF, $FF, $DC, $FC, $D8, $F0, $E0, $00, $00, $00   ; bg tile $18
+    .byte $FF, $CF, $FF, $FE, $FF, $FF, $9F, $FC, $00, $30, $00, $01, $20, $00, $60, $03   ; bg tile $19
+    .byte $FF, $CF, $FF, $7F, $FF, $FF, $F3, $FF, $00, $30, $00, $80, $04, $00, $0C, $00   ; bg tile $1A
+    .byte $FF, $CF, $FF, $F9, $FF, $9F, $FF, $FF, $00, $30, $00, $06, $00, $60, $00, $00   ; bg tile $1B
+    .byte $FF, $E7, $FF, $FF, $FF, $FF, $9F, $FF, $00, $18, $00, $00, $10, $00, $60, $00   ; bg tile $1C
+    .byte $F8, $F7, $EF, $DF, $DF, $D8, $D8, $D8, $00, $07, $0F, $1F, $1F, $1F, $1D, $1F   ; bg tile $1D
+    .byte $7F, $DF, $F7, $FB, $FB, $1B, $1B, $1B, $00, $C0, $F0, $F8, $F8, $F8, $B8, $F8   ; bg tile $1E
+    .byte $DC, $BF, $B7, $BF, $BF, $DF, $EF, $F0, $1F, $3F, $3F, $3F, $3F, $1F, $0F, $00   ; bg tile $1F
+    .byte $3B, $FD, $ED, $FD, $FD, $FB, $F7, $0F, $F8, $FC, $FC, $FC, $FC, $F8, $F0, $00   ; bg tile $20
+    .byte $00, $00, $0F, $3F, $30, $30, $30, $30, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $21
+    .byte $00, $00, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $22
+    .byte $00, $00, $F0, $FC, $0C, $0C, $0C, $0C, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $23
+    .byte $30, $30, $30, $30, $30, $30, $30, $30, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $24
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $25
-    .byte $14, $14, $14, $14, $14, $14, $14, $14, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $26
-    .byte $28, $28, $28, $2F, $20, $3F, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $27
-    .byte $00, $00, $00, $FF, $00, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $28
-    .byte $14, $14, $14, $F4, $04, $FC, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $29
+    .byte $0C, $0C, $0C, $0C, $0C, $0C, $0C, $0C, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $26
+    .byte $30, $30, $30, $30, $3F, $0F, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $27
+    .byte $00, $00, $00, $00, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $28
+    .byte $0C, $0C, $0C, $0C, $FC, $F0, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $29
     .byte $00, $60, $70, $78, $7C, $78, $70, $60, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $2A
     .byte $00, $00, $FF, $7E, $3C, $18, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $2B
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $2C

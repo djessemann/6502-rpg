@@ -4,6 +4,13 @@ A short, simple-mechanics NES RPG whose hook is **visual variety and
 personality** — many characters, tilesets, and background-rendered enemies. The
 art ambition is the spec; the mechanics are deliberately minimal.
 
+**One game, one theme.** The designer picks a single world/creative direction
+in `design/` and the whole game is built in it. "Visual variety" means variety
+*within* that one world — each region, town, and dungeon looks distinct, the
+cast is large, the monsters are individually drawn. It does **not** mean a
+theme-swapping mechanic; past experiments that reskinned the slice (see
+`archive/`) were pipeline tests, not features.
+
 This file is the binding contract. Follow it in every session and every file.
 The active phase and its scope live in the **Current phase** section below.
 

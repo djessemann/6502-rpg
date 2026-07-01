@@ -27,9 +27,11 @@ engine phase builds from `design/MECHANICS.md` (keep as UI/flow reference);
 
 ### space-theme-reskin/ — from `claude/space-theme-test-rom-p45hm8` (head `43c8646`)
 A content-only reskin of the slice (astronaut hero, service-droid NPC, alien
-enemy, metal-deck terrain) done purely through `tools/gen_assets.py` — kept as
-a worked example of retheming via the content entry points, and proof the
-pipeline supports full visual swaps (the game's core hook).
+enemy, metal-deck terrain) done purely through `tools/gen_assets.py`. Kept
+only as a worked example that all art flows through the content entry points.
+**This was a pipeline experiment, not a direction** — the game has one theme,
+chosen by the designer in `design/`; theme-swapping is not a mechanic and the
+final theme may or may not be fantasy, space, or anything else.
 
 ## Deleted without archiving (nothing unique worth keeping)
 - `claude/game-bible-spreadsheet-dkca8t` (`4b4ada2`) — its workbook was

@@ -162,6 +162,7 @@ sg2_cnt:      .res 1   ; segment 2 tile count (0 = no split)
 ; metasprite build scratch
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
+sprfrm:       .res 1   ; walk-cycle tile offset (0 or HERO_FRAME_OFF)
 oamoff:       .res 1   ; current OAM slot offset (slot * 4)
 
 woff:         .res 1   ; window draw: chunk index (k)
@@ -766,8 +767,27 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 ; own art; left/right share the side art, with left horizontally flipped (OAM
 ; attr bit 6) and its tile columns swapped. This is the reusable convention for
 ; every sprite character. OAM byte order: Y, tile, attr, X. Stored Y = screenY-1.
+;
+; Walk cycle: the hero animates constantly (DQ-style), toggling between the two
+; authored frames — every 8 frames while sliding (one stride per 16px step) and
+; every 16 frames at rest. Frame 1's tiles sit HERO_FRAME_OFF above frame 0's.
 .proc BuildOAM
     ldx #HERO
+    lda ent_state,x
+    cmp #ST_MOVE
+    bne @idle
+    lda frame_count     ; moving: toggle every 8 frames (bit 3...
+    asl a               ; ...shifted up into bit 4)
+    jmp @pick
+@idle:
+    lda frame_count     ; idle: toggle every 16 frames (bit 4)
+@pick:
+    and #%00010000
+    beq @frame0
+    lda #HERO_FRAME_OFF
+@frame0:
+    sta sprfrm          ; 0 or HERO_FRAME_OFF
+
     lda ent_dir,x
     asl a
     asl a
@@ -790,12 +810,14 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     ldy oamoff
     sta oam,y
 
-    ; tile = dir_tiles[sprbase + slot]
+    ; tile = dir_tiles[sprbase + slot] + walk-frame offset
     txa
     clc
     adc sprbase
     tay
     lda dir_tiles,y
+    clc
+    adc sprfrm
     ldy oamoff
     sta oam+1,y
 
@@ -2700,8 +2722,8 @@ pal_field:
     .byte $0F, $21, $11, $30   ; 1: water   - light blue, deep blue, white
     .byte $0F, $29, $27, $16   ; 2: deco    - grass green, gold, red (NPC/flowers)
     .byte $0F, $30, $16, $27   ; 3: window  - white ink, red + tan (brick walls)
-    ; Sprite palettes (seeded for later steps):
-    .byte $0F, $16, $27, $30
+    ; Sprite palettes:
+    .byte $0F, $0F, $27, $12   ; 0: hero - black outline, gold skin, blue tunic
     .byte $0F, $0C, $11, $30
     .byte $0F, $1A, $2A, $30
     .byte $0F, $0F, $30, $0F

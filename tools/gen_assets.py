@@ -181,63 +181,125 @@ TILES16 = {
 
 # ---------------------------------------------------------------------------
 # Hero metasprite: 16x16, drawn as a 2x2 block of tiles in pattern table 1.
-# Three authored facings (down/up/side); "left" is the side art H-flipped at
-# draw time. Value 0 = transparent. Sprite palette 0: 1=red, 2=tan, 3=white.
+# Three facings (down/up/side) x TWO walk frames each; "left" is the side art
+# H-flipped at draw time. The runtime toggles frames constantly (DQ-style),
+# faster while walking. Value 0 = transparent. Sprite palette 0:
+# 1=black (outline/boots), 2=gold (skin/belt), 3=blue (cap/tunic).
 # ---------------------------------------------------------------------------
 HERO_VIEWS = {
     "down": [
-        "0000011111100000",
-        "0000122222210000",
-        "0001222222221000",
-        "0001223223221000",   # two eyes
-        "0001222222221000",
-        "0001222222221000",
-        "0000122222210000",
-        "0000011111100000",
-        "0001111111111000",
-        "0011111111111100",
-        "0011111111111100",
-        "0011111111111100",
-        "0001111111111000",
-        "0001100000011000",
-        "0001100000011000",
-        "0001100000011000",
+        [   # frame 0: standing, both feet down
+            "0000011111100000",
+            "0000133333310000",   # cap
+            "0001333333331000",
+            "0001333333331000",
+            "0001222222221000",   # face
+            "0001221221221000",   # eyes (black)
+            "0000122222210000",
+            "0000012222100000",   # chin
+            "0001133333311000",   # shoulders
+            "0001233333321000",   # arms at the sides
+            "0001233333321000",
+            "0000122222210000",   # belt
+            "0000133113310000",   # legs
+            "0000133113310000",
+            "0000111001110000",   # boots
+            "0000000000000000",
+        ],
+        [   # frame 1: right leg lifted mid-step
+            "0000011111100000",
+            "0000133333310000",
+            "0001333333331000",
+            "0001333333331000",
+            "0001222222221000",
+            "0001221221221000",
+            "0000122222210000",
+            "0000012222100000",
+            "0001133333311000",
+            "0001233333321000",
+            "0001233333321000",
+            "0000122222210000",
+            "0000133113310000",
+            "0000133101110000",   # lifted right boot beside the planted leg
+            "0000111000000000",
+            "0000000000000000",
+        ],
     ],
-    "up": [   # back of the head: no face
-        "0000011111100000",
-        "0000122222210000",
-        "0001222222221000",
-        "0001222222221000",
-        "0001222222221000",
-        "0001222222221000",
-        "0000122222210000",
-        "0000011111100000",
-        "0001111111111000",
-        "0011111111111100",
-        "0011111111111100",
-        "0011111111111100",
-        "0001111111111000",
-        "0001100000011000",
-        "0001100000011000",
-        "0001100000011000",
+    "up": [
+        [   # frame 0: back view, standing
+            "0000011111100000",
+            "0000133333310000",
+            "0001333333331000",
+            "0001333333331000",   # back of the cap: no face
+            "0001333333331000",
+            "0001333333331000",
+            "0000133333310000",
+            "0000012222100000",   # neck
+            "0001133333311000",
+            "0001233333321000",
+            "0001233333321000",
+            "0000122222210000",
+            "0000133113310000",
+            "0000133113310000",
+            "0000111001110000",
+            "0000000000000000",
+        ],
+        [   # frame 1: left leg lifted mid-step
+            "0000011111100000",
+            "0000133333310000",
+            "0001333333331000",
+            "0001333333331000",
+            "0001333333331000",
+            "0001333333331000",
+            "0000133333310000",
+            "0000012222100000",
+            "0001133333311000",
+            "0001233333321000",
+            "0001233333321000",
+            "0000122222210000",
+            "0000133113310000",
+            "0000111013310000",   # lifted left boot beside the planted leg
+            "0000000001110000",
+            "0000000000000000",
+        ],
     ],
-    "side": [   # profile, facing RIGHT: one eye and a nose on the right
-        "0000111111000000",
-        "0001222222100000",
-        "0012222222210000",
-        "0012222223210000",   # eye toward the right
-        "0012222222232000",   # nose bump
-        "0012222222210000",
-        "0001222222100000",
-        "0000111111000000",
-        "0001111111100000",
-        "0011111111110000",
-        "0011111111110000",
-        "0011111111110000",
-        "0001111111100000",
-        "0001110011000000",
-        "0001110011000000",
-        "0001110011000000",
+    "side": [
+        [   # frame 0: profile facing RIGHT, standing
+            "0000011111100000",
+            "0000133333100000",
+            "0001333333310000",
+            "0001333333310000",   # cap covers the back of the head
+            "0001332222210000",   # face toward the right
+            "0001332221210000",   # eye (black) near the front
+            "0000132222100000",
+            "0000011111100000",
+            "0000133333100000",   # torso
+            "0000133332100000",   # front arm
+            "0000133332100000",
+            "0000122221000000",   # belt
+            "0000013331000000",   # legs together
+            "0000013331000000",
+            "0000011111100000",   # boot, toe forward
+            "0000000000000000",
+        ],
+        [   # frame 1: stride, legs scissored (1px bounce)
+            "0000011111100000",
+            "0000133333100000",
+            "0001333333310000",
+            "0001333333310000",
+            "0001332222210000",
+            "0001332221210000",
+            "0000132222100000",
+            "0000011111100000",
+            "0000133333100000",
+            "0000133332100000",
+            "0000133332100000",
+            "0000122221000000",
+            "0001331013310000",
+            "0011100011110000",
+            "0000000000000000",
+            "0000000000000000",
+        ],
     ],
 }
 
@@ -631,8 +693,11 @@ def main():
     # 8x8 (used by the text box).
     for t, art in TILES16.items():
         assert len(art) == 16 and all(len(r) == 16 for r in art), f"tile {t}"
-    for views in (HERO_VIEWS, NPC_VIEWS):
-        for name, art in views.items():
+    for name, art in NPC_VIEWS.items():
+        assert len(art) == 16 and all(len(r) == 16 for r in art), name
+    for name, frames in HERO_VIEWS.items():
+        assert len(frames) == 2, name
+        for art in frames:
             assert len(art) == 16 and all(len(r) == 16 for r in art), name
 
     bg = {0: BLANK8}                # tile $00 = blank (palette-independent)
@@ -693,16 +758,19 @@ def main():
     for tid in range(last_bg + 1):
         bg_bytes += to_chr(bg.get(tid, ["00000000"] * 8))
 
-    # Hero sprite tiles: down, up, side (left = side H-flipped at draw time).
+    # Hero sprite tiles: down, up, side (left = side H-flipped at draw time),
+    # walk frame 0 then walk frame 1 (frame 1 = frame 0's tile + HERO_FRAME_OFF).
     hero_bytes = []
-    for view in ("down", "up", "side"):
-        for tile in split16(HERO_VIEWS[view]):
-            hero_bytes += to_chr(tile)
+    for frame in (0, 1):
+        for view in ("down", "up", "side"):
+            for tile in split16(HERO_VIEWS[view][frame]):
+                hero_bytes += to_chr(tile)
 
     with open(os.path.join(src, "chr.s"), "w") as f:
         f.write("; chr.s - GENERATED by tools/gen_assets.py. Do not edit by hand.\n")
         f.write("; Pattern table 0: field tiles, NPC (4 facings), window, font, enemy ($00-$%02X).\n" % last_bg)
-        f.write("; Pattern table 1 ($1000): hero tiles - down $00, up $04, side $08.\n")
+        f.write("; Pattern table 1 ($1000): hero tiles - down $00, up $04, side $08;\n")
+        f.write("; walk frame 1 = same layout at +$0C.\n")
         f.write("; The CHR region fills the remaining 8KB with zero (see nes.cfg).\n\n")
         f.write('.segment "CHARS"\n')
         f.write("    ; --- pattern table 0: background ---\n")
@@ -881,7 +949,8 @@ def main():
         f.write("; Sprite tiles (pattern table 1), 4 tiles per facing.\n")
         f.write(f"HERO_DOWN_TILE = ${HERO_DOWN:02X}\n")
         f.write(f"HERO_UP_TILE   = ${HERO_UP:02X}\n")
-        f.write(f"HERO_SIDE_TILE = ${HERO_SIDE:02X}\n\n")
+        f.write(f"HERO_SIDE_TILE = ${HERO_SIDE:02X}\n")
+        f.write("HERO_FRAME_OFF = $0C   ; add for walk frame 1 (3 views x 4 tiles)\n\n")
         f.write("; Background tiles (pattern table 0).\n")
         f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
         f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")

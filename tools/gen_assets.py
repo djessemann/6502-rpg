@@ -493,31 +493,49 @@ FRAGMENTS = [
     ("WPN1", "Sword"),
     ("LBL_ATK", "  ATK "),
     ("LBL_POWER", "Power: "),
+    ("LBL_HP", "HP"),
 ]
 
 # ---------------------------------------------------------------------------
-# Enemy: authored at 16x16, doubled to 32x32, drawn as background tiles on the
-# battle screen (battle palette 1). Value 0 = transparent -> the blue battle
-# backdrop shows through, so the blob's silhouette blends cleanly.
-#   1 = body, 2 = shading, 3 = eyes/mouth (white).
+# Enemy: authored as TRUE 32x32 art, drawn as background tiles on the battle
+# screen (battle palette 1). Value 0 = transparent -> the black battle backdrop
+# shows through (silhouette, eye pupils, mouth). 1 = body (light blue),
+# 2 = shading (deep blue), 3 = eyes/gleam (white). A classic slime: curl tip,
+# big pupil eyes, wide smile, dark grounded base.
 # ---------------------------------------------------------------------------
-ENEMY16 = [
-    "0000001111000000",
-    "0000011111100000",
-    "0000111111110000",
-    "0001111111111000",
-    "0011111111111100",
-    "0011311113111100",
-    "0111311113111110",
-    "0111111111111110",
-    "1111111111111111",
-    "1111111111111111",
-    "1111122221111111",
-    "1111111111111111",
-    "0111111111111110",
-    "0011111111111100",
-    "0000111111110000",
-    "0000000000000000",
+ENEMY32 = [
+    "00000000000000001110000000000000",
+    "00000000000000011100000000000000",
+    "00000000000000111100000000000000",
+    "00000000000001111110000000000000",
+    "00000000000011111331000000000000",
+    "00000000000111113333100000000000",
+    "00000000001111111331110000000000",
+    "00000000011111111111111000000000",
+    "00000000111111111111111100000000",
+    "00000001111111111111111110000000",
+    "00000011111111111111111111000000",
+    "00000011111111111111111111000000",
+    "00000221133331111113333111100000",
+    "00000221133331111113333111100000",
+    "00002211130031111113003111110000",
+    "00002211130031111113003111110000",
+    "00022111133331111113333111111000",
+    "00022111111111111111111111111000",
+    "00221111111111111111111111111100",
+    "00221111011111111111111011111100",
+    "02211111101111111111110111111110",
+    "02211111110000000000001111111110",
+    "02211111111111111111111111111110",
+    "02211111111111111111111111111110",
+    "02211111111111111111111111111110",
+    "02211111111111111111111111111110",
+    "00222222222222222222222222222200",
+    "00022222222222222222222222222000",
+    "00000222222222222222222222200000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
+    "00000000000000000000000000000000",
 ]
 
 # Where the NPC stands, in 16px grid cells (must match NPC_GX/GY in main.s).
@@ -749,7 +767,7 @@ def main():
 
     # Enemy (32x32 = 4x4 tiles).
     e_base = nid
-    for tile in split_grid(double(ENEMY16), 4):
+    for tile in split_grid(ENEMY32, 4):
         bg[nid] = tile
         nid += 1
 
@@ -955,6 +973,9 @@ def main():
         f.write(f"ENEMY_TILE_BASE = ${e_base:02X}\n")
         f.write(f"ARROW_TILE = ${font_id[ARROW]:02X}   ; 'more text' prompt\n")
         f.write(f"WIN_BOTTOM_TILE = ${W_ids['B']:02X}   ; bottom-border tile (restores under the prompt)\n")
+        f.write("; Window frame tiles (for small fixed windows, e.g. battle status).\n")
+        for name in ("TL", "T", "TR", "L", "R", "BL", "BR"):
+            f.write(f"WIN_{name}_TILE = ${W_ids[name]:02X}\n")
         f.write(f"DIGIT_TILE = ${font_id['0']:02X}   ; '0'; digit d -> DIGIT_TILE + d\n")
         f.write(f"CURSOR_TILE = ${font_id[CURSOR]:02X}   ; menu cursor (right triangle)\n\n")
         f.write("; World geometry (16px metatiles): 2 screens wide, 1 tall.\n")

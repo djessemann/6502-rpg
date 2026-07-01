@@ -16,7 +16,7 @@
 .import worldtiles, attr_pair_l, attr_pair_r, worldsolid, winmap, msg_table
 .import frag_DMG_PRE, frag_DMG_POST
 .import frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1
-.import frag_LBL_ATK, frag_LBL_POWER
+.import frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
 
 ; ----------------------------------------------------------------------------
 ; Constants
@@ -61,6 +61,7 @@ BP_DEAD    = 2          ; damage shown, enemy at 0; A -> defeat message
 BP_DEFEATED = 3         ; defeat shown; A -> erase enemy and return
 
 ENEMY_MAX_HP = 15
+PLAYER_MAX_HP = 24
 
 ; WIN_STEPS comes from tiles.inc (box draw chunks: 4 clear + 1 attr + 4 content).
 ; The box is a full-width, 8-row window at screen rows 20-27, drawn in place over
@@ -180,6 +181,7 @@ box_open:     .res 1   ; nonzero while a field box is open (freezes streaming)
 
 ; battle / combat
 enemy_hp:     .res 1
+player_hp:    .res 1
 last_damage:  .res 1
 battle_phase: .res 1
 num:          .res 1   ; value AppendNumber renders
@@ -466,6 +468,8 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     sta equipped
     lda weapon_atk
     sta player_atk
+    lda #PLAYER_MAX_HP
+    sta player_hp
 
     lda #GS_FIELD
     sta gamestate
@@ -1943,6 +1947,94 @@ slot_dy:
     lda #%01010101
     sta PPUDATA
     sta PPUDATA
+
+    ; --- hero status window (DQ-style): rows 2-4, cols 2-9, "HP dd" ---
+    jsr ComposeHpRow    ; interior row (6 tiles) into msg_buf
+    bit PPUSTATUS
+    lda #$20            ; row 2: top border
+    sta PPUADDR
+    lda #$42
+    sta PPUADDR
+    lda #WIN_TL_TILE
+    sta PPUDATA
+    lda #WIN_T_TILE
+    ldx #6
+:   sta PPUDATA
+    dex
+    bne :-
+    lda #WIN_TR_TILE
+    sta PPUDATA
+    lda #$20            ; row 3: L + "HP dd " + R
+    sta PPUADDR
+    lda #$62
+    sta PPUADDR
+    lda #WIN_L_TILE
+    sta PPUDATA
+    ldx #0
+:   lda msg_buf,x
+    sta PPUDATA
+    inx
+    cpx #6
+    bne :-
+    lda #WIN_R_TILE
+    sta PPUDATA
+    lda #$20            ; row 4: bottom border
+    sta PPUADDR
+    lda #$82
+    sta PPUADDR
+    lda #WIN_BL_TILE
+    sta PPUDATA
+    lda #WIN_BOTTOM_TILE
+    ldx #6
+:   sta PPUDATA
+    dex
+    bne :-
+    lda #WIN_BR_TILE
+    sta PPUDATA
+    ; status-window attributes -> palette 3 ($23C0-$23C2, $23C8-$23CA; the
+    ; rest of those 32px blocks is blank backdrop, so palette is moot there)
+    lda #$23
+    sta PPUADDR
+    lda #$C0
+    sta PPUADDR
+    lda #$FF
+    sta PPUDATA
+    sta PPUDATA
+    sta PPUDATA
+    lda #$23
+    sta PPUADDR
+    lda #$C8
+    sta PPUADDR
+    lda #$FF
+    sta PPUDATA
+    sta PPUDATA
+    sta PPUDATA
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; ComposeHpRow — build the status-window interior row "HP dd" into msg_buf,
+; padded with blanks so the first 6 bytes are always valid tiles.
+; ----------------------------------------------------------------------------
+.proc ComposeHpRow
+    lda #<msg_buf
+    sta dst
+    lda #>msg_buf
+    sta dst+1
+    lda #<frag_LBL_HP
+    sta ptr
+    lda #>frag_LBL_HP
+    sta ptr+1
+    jsr CopyFrag        ; "HP"
+    lda #$00
+    jsr StoreDst        ; space
+    lda player_hp
+    sta num
+    jsr AppendNumber    ; 1-2 digits
+    lda #$00            ; pad: a 1-digit HP still fills all 6 tiles
+    jsr StoreDst
+    lda #$00
+    jsr StoreDst
     rts
 .endproc
 
@@ -2733,10 +2825,10 @@ pal_battle:
     ; text box needs (the box's black is value 0 = the backdrop). Every color-0
     ; entry is $0F so the $3F1x->$3F0x mirror can't clobber the backdrop.
     .byte $0F, $0F, $10, $30   ; 0: blank screen
-    .byte $0F, $13, $24, $30   ; 1: enemy - violet body, magenta shade, white
+    .byte $0F, $21, $11, $30   ; 1: enemy - light blue body, deep blue shade, white
     .byte $0F, $0F, $10, $30
-    .byte $0F, $30, $0F, $16   ; 3: window - black paper, white ink
-    .byte $0F, $16, $27, $30
+    .byte $0F, $30, $16, $27   ; 3: window - white ink (matches the field window)
+    .byte $0F, $0F, $27, $12
     .byte $0F, $06, $16, $30
     .byte $0F, $0C, $1C, $30
     .byte $0F, $0F, $30, $0F

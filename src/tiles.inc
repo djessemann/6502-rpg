@@ -10,6 +10,14 @@ HERO_FRAME_OFF = $0C   ; add for walk frame 1 (3 views x 4 tiles)
 ENEMY_TILE_BASE = $72
 ARROW_TILE = $2B   ; 'more text' prompt
 WIN_BOTTOM_TILE = $28   ; bottom-border tile (restores under the prompt)
+; Window frame tiles (for small fixed windows, e.g. battle status).
+WIN_TL_TILE = $21
+WIN_T_TILE = $22
+WIN_TR_TILE = $23
+WIN_L_TILE = $24
+WIN_R_TILE = $26
+WIN_BL_TILE = $27
+WIN_BR_TILE = $29
 DIGIT_TILE = $32   ; '0'; digit d -> DIGIT_TILE + d
 CURSOR_TILE = $2A   ; menu cursor (right triangle)
 

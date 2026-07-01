@@ -2,7 +2,7 @@
 ; msg_table: word pointers indexed by MSG_* (see tiles.inc).
 ; frag_*: $FF-terminated tile streams for runtime composition.
 
-.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER
+.export msg_table, frag_DMG_PRE, frag_DMG_POST, frag_OPT_TALK, frag_OPT_EQUIP, frag_WPN0, frag_WPN1, frag_LBL_ATK, frag_LBL_POWER, frag_LBL_HP
 
 .segment "RODATA"
 msg_table:
@@ -52,4 +52,7 @@ frag_LBL_ATK:
 
 frag_LBL_POWER:
     .byte $4D, $66, $6E, $5C, $69, $3C, $00, $FF
+
+frag_LBL_HP:
+    .byte $45, $4D, $FF
 

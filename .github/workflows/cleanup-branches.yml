@@ -1,0 +1,28 @@
+# Repo janitor: deletes every claude/* branch except the default branch.
+# Manual trigger only (Actions tab -> "Cleanup stray branches" -> Run workflow).
+# Safe by construction: it only touches branches named claude/*, never main.
+name: Cleanup stray branches
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
+            const branches = await github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 });
+            for (const b of branches) {
+              if (b.name === repoInfo.default_branch) continue;
+              if (!b.name.startsWith('claude/')) continue;
+              console.log(`deleting ${b.name} (was ${b.commit.sha.slice(0, 7)})`);
+              await github.rest.git.deleteRef({ owner, repo, ref: `heads/${b.name}` });
+            }
+            console.log('done');

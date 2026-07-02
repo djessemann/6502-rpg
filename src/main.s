@@ -3337,9 +3337,9 @@ slot_dy:
 .segment "RODATA"
 pal_field:
     ; Background palettes:
-    .byte $0F, $29, $1A, $17   ; 0: ground  - light/dark green + brown
+    .byte $0F, $1A, $29, $17   ; 0: ground  - dark grass, light foliage, brown
     .byte $0F, $21, $11, $30   ; 1: water   - light blue, deep blue, white
-    .byte $0F, $29, $27, $16   ; 2: deco    - grass green, gold, red (NPC/flowers)
+    .byte $0F, $1A, $27, $16   ; 2: deco    - grass green, gold, red (NPC/flowers)
     .byte $0F, $30, $16, $27   ; 3: window  - white ink, red + tan (brick walls)
     ; Sprite palettes:
     .byte $0F, $0F, $27, $12   ; 0: hero - black outline, gold skin, blue tunic

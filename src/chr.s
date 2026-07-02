@@ -7,10 +7,10 @@
 .segment "CHARS"
     ; --- pattern table 0: background ---
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $00
-    .byte $FF, $FF, $E7, $F7, $FF, $FF, $FF, $FF, $00, $00, $18, $08, $00, $00, $00, $00   ; bg tile $01
-    .byte $FF, $FF, $FF, $FF, $FF, $E7, $F7, $FF, $00, $00, $00, $00, $00, $18, $08, $00   ; bg tile $02
-    .byte $FF, $F9, $FD, $FF, $FF, $BF, $DF, $FF, $00, $06, $02, $00, $00, $40, $20, $00   ; bg tile $03
-    .byte $FF, $FF, $FF, $FF, $F9, $FD, $FF, $FF, $00, $00, $00, $00, $06, $02, $00, $00   ; bg tile $04
+    .byte $FF, $FF, $E7, $F7, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $01
+    .byte $FF, $FF, $FF, $FF, $FF, $E7, $F7, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $02
+    .byte $FF, $F9, $FD, $FF, $FF, $BF, $DF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $03
+    .byte $FF, $FF, $FF, $FF, $F9, $FD, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $04
     .byte $FF, $FF, $E7, $E7, $FF, $FF, $FF, $FF, $00, $18, $3C, $3C, $18, $00, $00, $00   ; bg tile $05
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00, $00, $00, $00, $00, $00   ; bg tile $06
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $BF, $FF, $00, $00, $00, $00, $00, $00, $40, $00   ; bg tile $07

@@ -5,6 +5,7 @@ HERO_DOWN_TILE = $00
 HERO_UP_TILE   = $04
 HERO_SIDE_TILE = $08
 HERO_FRAME_OFF = $0C   ; add for walk frame 1 (3 views x 4 tiles)
+CAT_TILE_BASE  = $18   ; 4 frames x 4 tiles, frame f at +f*4
 
 ; Background tiles (pattern table 0).
 ENEMY_TILE_BASE = $72

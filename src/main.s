@@ -22,8 +22,17 @@
 ; ----------------------------------------------------------------------------
 ; Constants
 ; ----------------------------------------------------------------------------
-MAX_ENT    = 8          ; entity array length (only the hero is used so far)
+MAX_ENT    = 8          ; entity array length
 HERO       = 0          ; entity index of the hero
+CAT        = 1          ; entity index of the wandering cat NPC
+
+; The cat wanders inside a home box (like a DQ townsperson), near spawn.
+CAT_MIN_GX = 5
+CAT_MAX_GX = 14
+CAT_MIN_GY = 8
+CAT_MAX_GY = 14
+CAT_START_GX = 10
+CAT_START_GY = 9
 
 VBUF       = $0300      ; NMI VRAM buffer: one packet [hi, lo, count, data...]
                         ; hi = $00 means "no update this frame"
@@ -172,6 +181,7 @@ sg2_cnt:      .res 1   ; segment 2 tile count (0 = no split)
 sprbase:      .res 1   ; ent_dir * 4 (index into dir_tiles)
 sprattr:      .res 1   ; OAM attribute byte for this facing
 sprfrm:       .res 1   ; walk-cycle tile offset (0 or HERO_FRAME_OFF)
+rng:          .res 1   ; 8-bit LFSR for NPC wandering
 oamoff:       .res 1   ; current OAM slot offset (slot * 4)
 
 woff:         .res 1   ; window draw: chunk index (k)
@@ -316,6 +326,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda in_battle
     bne @hide
     jsr BuildOAM
+    jsr BuildCatOAM
     jmp @sync
 @hide:
     jsr HideHero
@@ -467,6 +478,27 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda #ST_IDLE
     sta ent_state,x
 
+    ; the wandering cat NPC
+    ldx #CAT
+    lda #CAT_START_GX
+    sta ent_gx,x
+    lda #CAT_START_GY
+    sta ent_gy,x
+    lda #CAT_START_GX * 16
+    sta ent_px,x
+    lda #0
+    sta ent_pxh,x
+    lda #CAT_START_GY * 16
+    sta ent_py,x
+    lda #0
+    sta ent_pyh,x
+    lda #DIR_RIGHT      ; the art's native facing
+    sta ent_dir,x
+    lda #ST_IDLE
+    sta ent_state,x
+    lda #1
+    sta rng             ; LFSR seed (must be nonzero)
+
     lda #0
     sta stream_req      ; no pending row stream
     jsr UpdateCamera    ; seed the camera before the first frame
@@ -617,9 +649,95 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda newgy
     sta cs_gy
     jsr CellSolid       ; carry set => solid
-    bcs @blocked
+    bcc :+
+    rts
+:
+    ; The other walker blocks too (two walkers: HERO=0, CAT=1). Its committed
+    ; cell is its slide DESTINATION (see @go); while it slides, the cell it is
+    ; leaving is still occupied on screen, so that origin blocks as well.
+    txa
+    eor #$01
+    tay
+    lda ent_gx,y
+    cmp newgx
+    bne @chkslide
+    lda ent_gy,y
+    cmp newgy
+    bne @chkslide
+    rts                 ; target = other's cell
+@chkslide:
+    lda ent_state,y
+    cmp #ST_MOVE
+    bne @notheld
+    lda ent_gx,y        ; origin = its cell stepped opposite its direction
+    sta tpx
+    lda ent_gy,y
+    sta tpy
+    lda ent_dir,y
+    cmp #DIR_UP
+    bne :+
+    inc tpy             ; moving up: origin below
+    lda tpy
+    cmp #WORLD_H
+    bcc @cmporig
+    lda #0
+    sta tpy
+    beq @cmporig
+:   cmp #DIR_DOWN
+    bne :+
+    dec tpy             ; moving down: origin above
+    bpl @cmporig
+    lda #WORLD_H - 1
+    sta tpy
+    bne @cmporig
+:   cmp #DIR_LEFT
+    bne :+
+    inc tpx             ; moving left: origin to the right
+    lda tpx
+    cmp #WORLD_W
+    bcc @cmporig
+    lda #0
+    sta tpx
+    beq @cmporig
+:   dec tpx             ; moving right: origin to the left
+    bpl @cmporig
+    lda #WORLD_W - 1
+    sta tpx
+@cmporig:
+    lda tpx
+    cmp newgx
+    bne @notheld
+    lda tpy
+    cmp newgy
+    bne @notheld
+    rts                 ; target = the cell the other is still leaving
+@notheld:
 
-    lda #ST_MOVE        ; begin the slide; cell is set when it completes
+    ; The cat never leaves its home box.
+    cpx #CAT
+    bne @go
+    lda newgx
+    cmp #CAT_MIN_GX
+    bcc @boxout
+    cmp #CAT_MAX_GX + 1
+    bcs @boxout
+    lda newgy
+    cmp #CAT_MIN_GY
+    bcc @boxout
+    cmp #CAT_MAX_GY + 1
+    bcc @go
+@boxout:
+    rts
+@go:
+    ; Commit the destination cell NOW (not at slide end) so no other walker
+    ; can step into it mid-slide; the pixel position still slides there. All
+    ; cell-based interactions (encounters, Talk) resolve only when idle, so
+    ; they never see the in-flight cell.
+    lda newgx
+    sta ent_gx,x
+    lda newgy
+    sta ent_gy,x
+    lda #ST_MOVE
     sta ent_state,x
     lda #16
     sta ent_timer,x
@@ -733,7 +851,9 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     sta ent_gy,x
     lda #ST_IDLE
     sta ent_state,x
-    inc step_count
+    cpx #HERO
+    bne @done
+    inc step_count      ; only the hero's steps feed the encounter counter
 @done:
     rts
 .endproc
@@ -851,6 +971,121 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     inx
     cpx #4
     bne @slot
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; BuildCatOAM — draw the cat NPC into OAM slots 4-7 at its camera-relative
+; screen position (torus-aware on both axes), animating its 4 frames at
+; ~7.5 fps. The art faces right; walking left sets H-flip and swaps the tile
+; columns (slot eor 1). Hidden when off-screen or under an open text box
+; (sprites would draw over the BG-rendered window).
+; ----------------------------------------------------------------------------
+.proc BuildCatOAM
+    ldx #CAT
+    ; screen X = catX - camX (mod 512); visible iff 0..239
+    lda ent_px,x
+    sec
+    sbc camX_lo
+    sta tpx
+    lda ent_pxh,x
+    sbc camX_hi
+    and #$01
+    beq :+
+    jmp @hide
+:   lda tpx
+    cmp #240
+    bcc :+
+    jmp @hide
+:   ; screen Y = catY - camY (mod 480); visible iff 0..223
+    lda ent_py,x
+    sec
+    sbc cam_y_lo
+    sta tpy
+    lda ent_pyh,x
+    sbc cam_y_hi
+    bpl @ywrapped
+    pha                 ; negative: + 480 ($01E0)
+    lda tpy
+    clc
+    adc #$E0
+    sta tpy
+    pla
+    adc #$01
+@ywrapped:
+    bne @hide           ; high byte set -> outside the visible window
+    lda tpy
+    cmp #224
+    bcs @hide
+    ; under an open text box (screen rows 160-223)? the box owns that area
+    lda box_open
+    beq @visible
+    lda tpy
+    cmp #145            ; 145..223: sprite bottom (y+15) reaches row 160
+    bcs @hide
+@visible:
+    ; animation frame (frame_count/8 mod 4) -> base tile of the 2x2 block
+    lda frame_count
+    lsr a
+    lsr a
+    lsr a
+    and #$03
+    asl a
+    asl a
+    clc
+    adc #CAT_TILE_BASE
+    sta sprbase
+    ; facing: the art is right-facing; flip when it last walked left
+    lda ent_dir,x
+    cmp #DIR_LEFT
+    beq @flip
+    lda #$01            ; sprite palette 1
+    sta sprattr
+    lda #$00
+    sta sprfrm          ; no column swap
+    beq @slots          ; (branch always)
+@flip:
+    lda #$41            ; sprite palette 1 + H-flip
+    sta sprattr
+    lda #$01
+    sta sprfrm          ; swap tile columns (slot eor 1)
+@slots:
+    ldx #$00            ; slot 0..3 (TL, TR, BL, BR)
+    lda #16             ; OAM byte offset of hardware sprite 4
+    sta oamoff
+@slot:
+    lda tpy
+    clc
+    adc slot_dy,x
+    sec
+    sbc #1              ; stored Y = screenY - 1
+    ldy oamoff
+    sta oam,y
+    txa
+    eor sprfrm          ; eor 1 swaps TL/TR and BL/BR when flipped
+    clc
+    adc sprbase
+    sta oam+1,y
+    lda sprattr
+    sta oam+2,y
+    lda tpx
+    clc
+    adc slot_dx,x
+    sta oam+3,y
+    lda oamoff
+    clc
+    adc #4
+    sta oamoff
+    inx
+    cpx #4
+    bne @slot
+    rts
+@hide:
+    lda #$FF
+    sta oam+16
+    sta oam+20
+    sta oam+24
+    sta oam+28
     rts
 .endproc
 
@@ -1016,6 +1251,7 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
 
     ; --- GS_FIELD ---
     jsr UpdateHero
+    jsr CatTick         ; the cat wanders (field only; frozen in menus/battle)
     jsr WaterTick       ; shimmer the water palette (field only)
 
     ; Interactions/encounters only resolve when the hero is grid-aligned.
@@ -1390,6 +1626,41 @@ sd_src_hi: .res STREAM_MAX  ; source pointer high
     lda #GS_FIELD
     sta gamestate
 @ret6:
+    rts
+.endproc
+
+; ----------------------------------------------------------------------------
+; CatTick — wander AI for the cat NPC. While sliding, keep sliding. While
+; idle, clock the LFSR every frame (so decisions vary with when the player
+; moves) and roughly once a second either amble one cell in a random
+; direction or stay put. TryStep enforces terrain, the hero's cell, and the
+; cat's home box.
+; ----------------------------------------------------------------------------
+.proc CatTick
+    ldx #CAT
+    lda ent_state,x
+    cmp #ST_MOVE
+    bne @idle
+    jsr StepMove
+    rts
+@idle:
+    lda rng             ; clock the LFSR (taps $1D)
+    asl a
+    bcc :+
+    eor #$1D
+:   sta rng
+    lda frame_count
+    and #$3F
+    beq @decide
+    rts
+@decide:
+    lda rng
+    and #$07
+    cmp #4
+    bcs @stay           ; half the time: sit still
+    sta ent_dir,x       ; 0..3 matches DIR_UP/DOWN/LEFT/RIGHT
+    jsr TryStep
+@stay:
     rts
 .endproc
 
@@ -2308,8 +2579,9 @@ slot_dy:
     sta ptr+1
     jsr LoadPalette
 
-    ; Rebuild the hero sprite and push it before rendering resumes.
+    ; Rebuild the hero and cat sprites and push them before rendering resumes.
     jsr BuildOAM
+    jsr BuildCatOAM
     lda #$00
     sta OAMADDR
     lda #>OAM_BUF
@@ -2356,7 +2628,8 @@ slot_dy:
 .endproc
 
 ; ----------------------------------------------------------------------------
-; HideHero — park the hero's 4 metasprite entries off-screen (battle screen).
+; HideHero — park the hero's and the cat's metasprite entries off-screen
+; (battle screen).
 ; ----------------------------------------------------------------------------
 .proc HideHero
     lda #$FF
@@ -2364,6 +2637,10 @@ slot_dy:
     sta oam+4
     sta oam+8
     sta oam+12
+    sta oam+16
+    sta oam+20
+    sta oam+24
+    sta oam+28
     rts
 .endproc
 
@@ -3066,7 +3343,7 @@ pal_field:
     .byte $0F, $30, $16, $27   ; 3: window  - white ink, red + tan (brick walls)
     ; Sprite palettes:
     .byte $0F, $0F, $27, $12   ; 0: hero - black outline, gold skin, blue tunic
-    .byte $0F, $0C, $11, $30
+    .byte $0F, $24, $15, $0F   ; 1: cat - pink, red mouth, black eyes (nesprite)
     .byte $0F, $1A, $2A, $30
     .byte $0F, $0F, $30, $0F
 

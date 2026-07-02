@@ -164,8 +164,12 @@ in RAM (`CopyFrag` + `AppendNumber` → `DIGIT_TILE`) and rendered the same way.
 
 `ent_gx, ent_gy` (16px grid cell) · `ent_px, ent_py` (sprite pixel pos) ·
 `ent_dir` · `ent_state` (IDLE/MOVE) · `ent_timer` (pixels left in a slide).
-Index 0 = hero (only one used so far; arrays sized `MAX_ENT`=8). Hero entity data
-is preserved across battle, so `ExitBattle` returns it to the prior position.
+Index 0 = hero, index 1 = the wandering cat NPC (arrays sized `MAX_ENT`=8).
+Entity data is preserved across battle, so `ExitBattle` returns everyone to
+their prior position; the cat only ticks in `GS_FIELD` (`CatTick`: LFSR-driven
+amble inside a home box), so it freezes during menus, dialogue and battle, and
+`BuildCatOAM` draws it camera-relative in OAM slots 4-7 (hidden off-screen,
+under an open box, and in battle).
 
 ## World, camera & scrolling (2×2 four-screen world)
 
@@ -202,15 +206,25 @@ shadows; the hero starts so `cam_ty = 0` to match.
 
 ## Movement & collision
 
-Grid is 16px cells = one metatile each (32×30). `TryStep` picks the target cell,
-**wrapping at the edges** (`WORLD_W`/`WORLD_H`), and slides if it isn't solid.
-Collision is a single lookup: `CellSolid` reads `worldsolid[gy*WORLD_W + gx]`
-(1 = solid: wall/water/tree/NPC).
+Grid is 16px cells = one metatile each (32×30). `TryStep` (X = entity index)
+picks the target cell, **wrapping at the edges** (`WORLD_W`/`WORLD_H`), and
+slides if the cell is free. Static collision is a single lookup: `CellSolid`
+reads `worldsolid[gy*WORLD_W + gx]` (1 = solid: wall/water/tree/NPC). Walkers
+also block **each other**: the other walker's committed cell is occupied, and
+while it slides, the origin cell it is still leaving stays occupied too. The
+destination cell is **committed at slide start**, so two walkers can never
+share a cell; every cell-based interaction (encounters, Talk) resolves only
+while an entity is idle, so nothing ever observes an in-flight cell. The cat is
+additionally confined to its home box (`CAT_MIN/MAX_GX/GY`).
 
 `StepMove` is **direction-based**, `MOVE_SPEED`(2) px/frame in `ent_dir`. World X
 is 16-bit (`ent_px`/`ent_pxh`), wrapping mod 512; world Y is 16-bit
-(`ent_py`/`ent_pyh`), wrapping mod 480. After 16px it snaps the grid cell from the
-world position (`gx = (pxh<<4)|(px>>4)`, `gy = (pyh<<4)|(py>>4)`).
+(`ent_py`/`ent_pyh`), wrapping mod 480. After 16px it re-derives the grid cell
+from the world position (`gx = (pxh<<4)|(px>>4)`, `gy = (pyh<<4)|(py>>4)`) and
+returns to idle. **Only the hero's completed steps feed the encounter counter**
+(`step_count` is gated on `cpx #HERO`) — player-only side effects never live
+unguarded in the shared movement code, or a wandering NPC starts battles by
+itself.
 
 ### Text boxes drawn in place over the scrolling map (Dragon-Quest style)
 

@@ -45,3 +45,7 @@ target alike. Cheap to honor up front, agony to retrofit.
 - **Never blank the screen to show UI.** Draw menus/text boxes **in place** over
   the scene and restore underneath on close (see `PATTERNS.md`). A rendering-off
   repaint for a box is a visible black flash on every open/close.
+- **Player-only side effects in shared entity code.** Movement/slide routines
+  serve every walker; gate anything player-only (encounter step counting,
+  interaction triggers) on the player's entity index — unguarded, the first
+  wandering NPC triggers random battles by itself.

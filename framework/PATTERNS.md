@@ -26,9 +26,14 @@ width the world needs (16-bit once it exceeds 255px).*
 
 ## Entities
 Struct-of-arrays indexed by X: grid cell + pixel position + dir + state + a slide
-timer. Idle: pick a target cell (wrap or block on collision), start a slide. Slide:
-move N px/frame, snap the cell on arrival. *Invariant: only moving actors are
-sprites; stationary NPCs are background tiles.*
+timer. Idle: pick a target cell (wrap or block on collision), start a slide,
+**committing the cell at slide start** — and treat a slider's origin cell as
+occupied until it lands — so two walkers can never stack or pass through each
+other. Slide: move N px/frame; re-derive the cell on arrival. *Invariants: only
+moving actors are sprites; stationary NPCs are background tiles. Shared movement
+code carries no player-only side effects — gate encounter counting and
+interaction triggers on the player's entity index, or a wandering NPC triggers
+random battles by itself.*
 
 ## Text engine
 Author messages as plain strings; the generator word-wraps + paginates and emits

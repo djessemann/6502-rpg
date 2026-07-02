@@ -154,6 +154,10 @@ prototypes.
   do them with rendering AND NMI disabled (the same safe window as boot): blank
   PPUMASK/PPUCTRL, write VRAM freely, reset scroll, re-enable. Push hidden/updated
   OAM via a manual DMA before re-enabling so stale sprites don't flash.
+- **Player-only side effects in shared entity code.** `TryStep`/`StepMove` serve
+  every walker; gate anything player-only (the encounter step counter,
+  interaction triggers) on the hero's entity index. (Unguarded, the wandering
+  cat NPC's steps drove `step_count` and started random battles on its own.)
 
 -----
 

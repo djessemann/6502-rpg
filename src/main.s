@@ -46,7 +46,7 @@ GS_FIELD   = 0          ; walking around
 GS_OPENING = 1          ; wiping the text window in
 GS_DIALOG  = 2          ; window shown, waiting to close
 GS_CLOSING = 3          ; wiping the text window out
-GS_BATTLE  = 4          ; battle: enemy shown, waiting for an attack
+                        ; (4 is retired; battle runs through OPENING/TEXT/BWAIT)
 GS_ENEMYDIE = 5         ; erasing the enemy tiles (one row per frame)
 GS_BATTLEWAIT = 6       ; brief pause after the enemy vanishes, then return
 GS_TEXT    = 7          ; rendering message lines into the open box

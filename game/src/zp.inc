@@ -121,9 +121,10 @@ fade_level    = $67
 scratch       = $68     ; 8 bytes of general scratch ($68-$6F)
 
 ; $70-$FF are free for subsystem-local use; see the subsystem's source file.
-vram_lo       = $70
-vram_hi       = $71
-vram_cnt      = $72
+; $70-$74 belong to FlushVBuf and are touched by NOTHING else: the NMI runs
+; between arbitrary main-thread instructions, so it may not borrow tmp0..tmp7.
+vram_mode     = $70     ; NMI-only: the packet mode being flushed
+vram_cnt      = $72     ; NMI-only: its byte count
 vram_ptr      = $73     ; 2
 row_ptr       = $75     ; 2
 col_ptr       = $77     ; 2
@@ -225,5 +226,7 @@ ti_tmp2       = $DB
 ti_has_save   = $DC     ; a valid save was found in the battery at boot
 ti_sum        = $DD     ; 2 - checksum accumulator
 ti_cnt        = $DF
+pend_msg      = $E1     ; an Anchor core's scene message: its victory plays
+                        ; the three that follow it (relight, spark, key item)
 ti_flush      = $E0     ; FlushQueue's own counter: the row composers
                         ; below it all use ti_cnt as scratch

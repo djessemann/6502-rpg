@@ -58,9 +58,28 @@ def window_open(frame):
     return bool((inner.sum(axis=2) == 0).mean() > 0.80)
 
 
+def start_game(r, settle=40):
+    """Drive the title screen into the field, the way a player would.
+
+    The ROM boots to the title now, so any test that runs the real
+    threnos.nes has to get through it first -- otherwise it scripts a walk at
+    a menu and quietly measures nothing. Six A presses: NEW GAME, four class
+    picks (whatever the cursor is already on), MAKE PLANETFALL.
+    """
+    r.idle(settle)
+    r.tap(A, 3, 40)                 # NEW GAME
+    for _ in range(4):              # four slots, taking the default class
+        r.tap(A, 3, 24)
+    r.tap(A, 3, 60)                 # MAKE PLANETFALL
+    r.idle(settle)
+    return r
+
+
 class Player:
-    def __init__(self, rom, settle=20):
+    def __init__(self, rom, settle=20, title=False):
         self.r = Run(rom=rom)
+        if title:
+            start_game(self.r)
         self.r.idle(settle)
         self.battles = 0
         self.windows = 0

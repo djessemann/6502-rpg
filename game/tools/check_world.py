@@ -88,6 +88,17 @@ def main():
             errors.append(f"{site} needs {got}, but the design says "
                           f"{'on foot' if not want else 'grav-lift'}")
 
+    # LoadObjects fills entity slots 1..MAX_ENT-1, so anything past that is
+    # silently dropped. The overworld had 14 warps against a cap of 11 and lost
+    # the Ossuary, the Causeway and Erebus -- the endgame dungeon had no
+    # entrance at all.
+    MAX_OBJECTS = 15            # MAX_ENT in src/ram.inc, minus the party leader
+    if len(m.objects) > MAX_OBJECTS:
+        errors.append(f"the overworld has {len(m.objects)} objects but only "
+                      f"{MAX_OBJECTS} entity slots: "
+                      f"{[world.MAP_NAMES[o[3]] for o in m.objects[MAX_OBJECTS:]]} "
+                      f"would be dropped at load")
+
     walk = len(levels[0])
     print(f"\nwalkable on foot: {walk} cells of {m.w * m.h}")
     if walk < 4000:

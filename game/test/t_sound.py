@@ -57,10 +57,18 @@ def makefile_sources():
     return out
 
 
-def build_selftest(dst, dead=False):
-    """Assemble every source with SOUND_SELFTEST defined and link a test ROM."""
+def build_selftest(dst, dead=False, selftest=True):
+    """Assemble every source and link a test ROM.
+
+    Every ROM here is built with TEST_SKIP_TITLE: the real game boots to the
+    title screen, which is a still picture, and this test needs the field --
+    it measures "renders a real picture" and "is still animating", neither of
+    which a menu does.
+    """
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="threnos-snd-"))
-    defines = ["-D", "SOUND_SELFTEST"]
+    defines = ["-D", "TEST_SKIP_TITLE=1"]
+    if selftest:
+        defines += ["-D", "SOUND_SELFTEST"]
     if dead:
         defines += ["-D", "SOUND_SELFTEST_DEAD"]
     objs = []
@@ -104,8 +112,10 @@ def main():
     print("building the SOUND_SELFTEST ROM...")
     snd_rom = build_selftest(ROOT / "test" / "threnos_snd.nes")
 
-    print("\nsilent ROM (threnos.nes):")
-    r0, m0, t0, n0 = run_script(ROOT / "threnos.nes")
+    silent_rom = build_selftest(ROOT / "test" / "threnos_snd_silent.nes",
+                                selftest=False)
+    print("\nsilent ROM (test/threnos_snd_silent.nes):")
+    r0, m0, t0, n0 = run_script(silent_rom)
     print(f"  {n0} frames in {t0:.1f}s")
     print("music ROM (test/threnos_snd.nes): song changes every 256 frames, "
           "sfx every 64")

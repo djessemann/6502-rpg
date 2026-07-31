@@ -39,22 +39,22 @@ mcol_buf       = $05C0      ; 16: metatile ids of one column slice
 digits         = $05D0      ;  6: decimal digit scratch for PutNumber
 
 ; Field entities (struct-of-arrays). Index 0 = the party leader.
-MAX_ENT        = 12
+MAX_ENT        = 16
 ent_gx         = $0600
-ent_gy         = $060C
-ent_px         = $0618      ; world pixel X low
-ent_pxh        = $0624      ; world pixel X high
-ent_py         = $0630
-ent_pyh        = $063C
-ent_dir        = $0648
-ent_state      = $0654
-ent_timer      = $0660
-ent_kind       = $066C      ; 0 = none, 1 = npc(bg), 2 = npc(sprite), 3 = chest
-ent_arg        = $0678      ; message id / chest id
-ent_tile       = $0684      ; base BG metatile or sprite tile
-ent_home       = $0690      ; movement anchor / flags
-ent_a4         = $069C      ; the object record's 8th byte (chest credits high)
-; $06A8-$07FF spare
+ent_gy         = $0610
+ent_px         = $0620      ; world pixel X low
+ent_pxh        = $0630      ; world pixel X high
+ent_py         = $0640
+ent_pyh        = $0650
+ent_dir        = $0660
+ent_state      = $0670
+ent_timer      = $0680
+ent_kind       = $0690      ; 0 = none, 1 = npc(bg), 2 = npc(sprite), 3 = chest
+ent_arg        = $06A0      ; message id / chest id
+ent_tile       = $06B0      ; base BG metatile or sprite tile
+ent_home       = $06C0      ; movement anchor / flags
+ent_a4         = $06D0      ; the object record's 8th byte (chest credits high)
+; $06E0-$07FF spare
 
 ; --- SAVE file ($6000-$67FF). Bytes here are the save format. ----------------
 SAVE_BASE      = $6000

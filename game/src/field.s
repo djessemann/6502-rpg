@@ -25,7 +25,10 @@
 .import BattleEnter, BattleTick, InitParty, RollEncounter
 .import PutNumber, PutString, Mul8
 .import item_names, boss_by_map
+.import gate_flag, gate_msg, boon_tab
 .import SetPrgCode
+.import TitleEnter, TitleTick
+.export StartNewGame, StartLoadedGame, StampPosition
 
 DIR_UP    = 0
 DIR_DOWN  = 1
@@ -49,11 +52,20 @@ GS_BOXCLOSE = 5
 GS_BATTLE   = 6
 GS_GAMEOVER = 7
 GS_ENDED    = 8
+GS_TITLE    = 9
 
 TEXT_ROW0   = 21
 TEXT_LINES  = 4
 
 ; map object kinds (must match tools/maps.py)
+PROP_SOLID = $01
+PROP_WATER = $02
+PROP_HIGH  = $04
+
+VEH_SKIFF  = $01
+VEH_LIFT   = $02
+
+; map object kinds continued
 OB_NPC   = 1
 OB_CHEST = 2
 OB_WARP  = 3
@@ -75,11 +87,12 @@ OB_TRIG  = 8
     sta gamestate
     sta game_flags
     jsr InitStoryState
+    jsr DefaultClasses
 
+.if .defined(TEST_START_DUNGEON) .or .defined(TEST_SKIP_TITLE)
     lda #BATTLE_BANK
     jsr SetPrgCode
     jsr InitParty
-
 .ifdef TEST_START_DUNGEON
     lda #TEST_START_DUNGEON     ; test builds boot straight into a map
     jsr LoadMap
@@ -97,10 +110,29 @@ OB_TRIG  = 8
 .else
     lda #0                      ; the overworld
     jsr LoadMap
+.ifdef TEST_START_X
+    lda #TEST_START_X           ; a chosen overworld cell, for gate tests
+    sta ent_gx
+    lda #TEST_START_Y
+    sta ent_gy
+.else
     lda #44                     ; START position (see tools/world.py)
     sta ent_gx
     lda #68
     sta ent_gy
+.endif
+.endif
+.ifdef TEST_GRANT_ALL
+    ldx #0                      ; every Anchor lit: the late game, for testing
+    lda #$FF                    ; that a gate opens rather than that it exists
+:   sta story_flags,x
+    inx
+    cpx #32
+    bne :-
+.endif
+.ifdef TEST_VEHICLES
+    lda #TEST_VEHICLES
+    sta vehicles
 .endif
     lda #DIR_DOWN
     sta ent_dir
@@ -109,6 +141,90 @@ OB_TRIG  = 8
     jsr SyncHeroPixels
     jsr UpdateCamera
     jsr DrawFullMap
+    rts
+.else
+    lda #GS_TITLE               ; the real game boots to the title screen
+    sta gamestate
+    lda #TITLE_BANK
+    jsr SetPrgCode
+    jmp TitleEnter
+.endif
+.endproc
+
+; InitParty reads party_class. A test build never sees the muster, so it still
+; needs the historical SOLDIER / RANGER / MEDIC / PSION line-up.
+.proc DefaultClasses
+    ldx #0
+:   txa
+    sta party_class,x
+    inx
+    cpx #4
+    bne :-
+    rts
+.endproc
+
+.proc StTitle
+    lda #TITLE_BANK
+    jsr SetPrgCode
+    jmp TitleTick
+.endproc
+
+; --- the two ways into the game, called from title.s; neither comes back -----
+.proc StartNewGame
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    jsr InitParty
+    lda #0
+    jsr LoadMap
+    lda #44
+    sta ent_gx
+    lda #68
+    sta ent_gy
+    lda #DIR_DOWN
+    sta ent_dir
+    jmp EnterField
+.endproc
+
+; LoadGame has already put the saved state back before this is called.
+.proc StartLoadedGame
+    lda cur_map
+    jsr LoadMap
+    lda cur_gx
+    sta ent_gx
+    lda cur_gy
+    sta ent_gy
+    lda cur_dir
+    and #3
+    sta ent_dir
+    jmp EnterField
+.endproc
+
+.proc EnterField
+    lda #ST_IDLE
+    sta ent_state
+    lda #GS_FIELD
+    sta gamestate
+    lda #0
+    sta game_flags
+    jsr SyncHeroPixels
+    jsr UpdateCamera
+    jsr DrawFullMap             ; also puts the tileset CHR back over the logo
+    lda map_music
+    sta music_req
+    rts
+.endproc
+
+; Copy the party's live position into the save block. A save terminal calls
+; this before SaveGame, so CONTINUE puts you back where you stood.
+.proc StampPosition
+    lda map_id
+    sta cur_map
+    lda ent_gx
+    sta cur_gx
+    lda ent_gy
+    sta cur_gy
+    lda ent_dir
+    sta cur_dir
     rts
 .endproc
 
@@ -119,6 +235,8 @@ OB_TRIG  = 8
     lda #0
     sta msg_chain
     sta box_ctx
+    lda #$FF
+    sta pend_msg
     rts
 .endproc
 
@@ -537,6 +655,13 @@ OB_TRIG  = 8
     beq @noboss
     lda tmpa
     sta pend_flag               ; set once the fight is won
+    lda #$FF
+    sta pend_msg
+    lda ent_dir,x               ; a1 = script id; 2 is an Anchor core, whose
+    cmp #2                      ; victory plays the three scenes that follow
+    bne @say                    ; its own (relight, spark, key item)
+    lda ent_arg,x
+    sta pend_msg
     jmp @say
 @noboss:
     lda #$FF
@@ -584,7 +709,18 @@ OB_TRIG  = 8
     lda story_flags,y
     ora bit_tab,x
     sta story_flags,y
-    rts
+    tya                         ; relighting an Anchor may hand over a vehicle
+    asl a
+    asl a
+    asl a
+    stx tmpc
+    ora tmpc
+    tay
+    lda boon_tab,y
+    beq :+
+    ora vehicles
+    sta vehicles
+:   rts
 .endproc
 
 ; =============================================================================
@@ -787,6 +923,19 @@ OB_TRIG  = 8
     lda ent_kind,x
     cmp #OB_WARP
     bne @none
+    lda ent_tile,x              ; a0 = destination map
+    tay
+    lda gate_flag,y             ; which Anchor this door waits on ($FF = none)
+    cmp #$FF
+    beq @open
+    sty tmpc                    ; StoryFlagSet ends in TAX, so the object slot
+    jsr StoryFlagSet            ; has to be reloaded from obj_i afterwards
+    ldy tmpc
+    ldx obj_i
+    bcs @open
+    lda gate_msg,y              ; sealed / PASSKEY / RIFT KEY
+    jmp ShowMessage
+@open:
     lda ent_tile,x              ; a0 = destination map
     pha
     lda ent_dir,x               ; a1 = destination gx
@@ -2244,6 +2393,16 @@ OB_TRIG  = 8
     jsr ReturnToField
     lda #GS_FIELD
     sta gamestate
+    lda pend_msg                ; an Anchor core: play the relight scene. The
+    cmp #$FF                    ; flag (and its vehicle) is already set above,
+    beq @plain                  ; so the scene can promise what it hands over.
+    clc
+    adc #1
+    ldy #$FF
+    sty pend_msg
+    ldx #2
+    jmp ShowMessageChain
+@plain:
     rts
 @over:
     lda #GS_GAMEOVER
@@ -2328,9 +2487,28 @@ OB_TRIG  = 8
     lda tgt_gx
     bmi @blocked
     jsr CellProp
+    ; RIDGE is PROP_SOLID | PROP_HIGH, so the grav-lift has to be consulted
+    ; before the solid test, or high ground is rejected before it is asked
+    ; about. Deep water is PROP_SOLID and stays impassable; SEA is PROP_WATER
+    ; and opens with the skiff.
     lda prop_res
-    and #1                      ; PROP_SOLID
+    and #PROP_HIGH
+    beq @notHigh
+    lda vehicles
+    and #VEH_LIFT
+    beq @blocked
+    jmp @walk
+@notHigh:
+    lda prop_res
+    and #PROP_SOLID
     bne @blocked
+    lda prop_res
+    and #PROP_WATER
+    beq @walk
+    lda vehicles
+    and #VEH_SKIFF
+    beq @blocked
+@walk:
     lda #ST_MOVE
     sta ent_state
     lda #16
@@ -2429,6 +2607,7 @@ state_tab:
     .addr StBattle-1
     .addr StGameOver-1
     .addr StEnded-1
+    .addr StTitle-1
 
 dir_tile:  .byte HERO_TILE_UP, HERO_TILE_DOWN, HERO_TILE_SIDE, HERO_TILE_SIDE
 dir_attr:  .byte 0, 0, $40, 0

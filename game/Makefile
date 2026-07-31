@@ -13,7 +13,9 @@ SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/field.s \
            $(SRCDIR)/text.s \
            $(SRCDIR)/battle.s \
+           $(SRCDIR)/title.s \
            $(GENDIR)/chr.s \
+           $(GENDIR)/title.s \
            $(GENDIR)/tables.s \
            $(GENDIR)/tilesets.s \
            $(GENDIR)/maps_world.s \

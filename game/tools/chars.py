@@ -90,9 +90,9 @@ WARDEN_UP_1 = [
 WARDEN_SIDE_0 = [
     "...1111111......",
     "..122222221.....",
-    "..123333331.....",
-    "..123333331.....",
-    "..123333331.....",
+    "..122223331.....",
+    "..122223331.....",
+    "..122222221.....",
     "..122222221.....",
     "..112222211.....",
     "...11222211.....",
@@ -109,9 +109,9 @@ WARDEN_SIDE_0 = [
 WARDEN_SIDE_1 = [
     "...1111111......",
     "..122222221.....",
-    "..123333331.....",
-    "..123333331.....",
-    "..123333331.....",
+    "..122223331.....",
+    "..122223331.....",
+    "..122222221.....",
     "..122222221.....",
     "..112222211.....",
     "...11222211.....",
@@ -137,9 +137,15 @@ def build_sprite_bank():
     return tiles
 
 
+# Colour 1 is BLACK in every party sub-palette, and the art uses colour 1 as its
+# outline: a hard black edge is the only thing that keeps a 16x16 figure legible
+# over ash, dirt, road, grass, slag and deck plate alike. The old palette drew
+# the hero in the same browns as the ground he walks on and he disappeared.
+# Entry 0 must equal the backdrop ($0F) or it overwrites it -- see the
+# palette-mirror trap in framework/HARDWARE.md.
 SPRITE_PALETTE = [
-    0x0F, 0x17, 0x27, 0x30,     # party: browns + white visor
-    0x0F, 0x11, 0x21, 0x30,     # blue
-    0x0F, 0x19, 0x29, 0x30,     # green
-    0x0F, 0x05, 0x16, 0x30,     # red
+    0x0F, 0x0F, 0x11, 0x30,     # 0 blue  - cool against a warm dead world
+    0x0F, 0x0F, 0x16, 0x30,     # 1 red
+    0x0F, 0x0F, 0x1A, 0x30,     # 2 green
+    0x0F, 0x0F, 0x28, 0x30,     # 3 gold
 ]

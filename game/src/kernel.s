@@ -210,6 +210,11 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 
 ; -----------------------------------------------------------------------------
 ; FlushVBuf — write the queued packets to VRAM. NMI only.
+;
+; Scratch here is vram_mode/vram_cnt, never tmp0..tmp7. The NMI lands between
+; arbitrary main-thread instructions, so anything it borrows is destroyed under
+; whoever it interrupted — and VBufAlloc itself parks the packet size in tmp0
+; across the header writes, so borrowing tmp0 here scrambled the queue.
 ; -----------------------------------------------------------------------------
 .proc FlushVBuf
     lda #<VBUF
@@ -222,7 +227,7 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     bne @go
     rts
 @go:
-    sta tmp0                ; mode
+    sta vram_mode           ; mode
     cmp #2
     beq @col
     lda ppu_ctrl
@@ -242,10 +247,10 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     sta PPUADDR
     iny
     lda (vram_ptr),y
-    sta tmp1                ; count
+    sta vram_cnt            ; count
     iny
-    ldx tmp1
-    lda tmp0
+    ldx vram_cnt
+    lda vram_mode
     cmp #3
     beq @fill
 @copy:

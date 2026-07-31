@@ -50,6 +50,61 @@ CMD_RUN   = 4
 TEXT_ROW0 = 21
 MSG_HOLD  = 40              ; frames a battle message stays up on its own
 
+; --- monster record layout (MON_REC bytes, see tools/emit_data.py) -----------
+M_HP    = 0                 ; 2
+M_ATK   = 2
+M_DEF   = 3
+M_AGI   = 4
+M_SPI   = 5
+M_XP    = 6                 ; 2
+M_GOLD  = 8                 ; 2
+M_WEAK  = 10
+M_IMM   = 11
+M_AI    = 12
+M_SPEC  = 13
+M_BOSS  = 14
+M_SIZE  = 15
+
+; --- tech record layout (TECH_REC bytes) -------------------------------------
+K_SCHOOL = 0
+K_COST   = 1
+K_POWER  = 2
+K_ELEM   = 3
+K_TARGET = 4
+K_STATUS = 5                ; inflicted by an offensive tech, cured by a support
+
+; enemy AI modes (mon_rec+M_AI)
+AI_MELEE  = 0               ; attacks, nothing else
+AI_MIXED  = 1               ; attacks; about one turn in three uses the special
+AI_CASTER = 2               ; uses the special most turns
+
+AI_MIXED_ODDS  = 85         ; out of 256
+AI_CASTER_ODDS = 160
+
+; How often a tech's status lands, out of 256, halved again on a boss. At the
+; obvious 50% an all-target tech landed on three or four combatants at once and
+; the fight stopped being a fight - THE ARCHON's SHATTER stun-locked the party
+; through 71% of its casts (tools/balance.py).
+ST_ODDS = 64
+
+; --- battle-local zero page --------------------------------------------------
+; zp.inc allocates $00-$D3 and leaves $70-$FF to the subsystems; these are
+; battle.s's own, taken from the top so the field/text engines cannot collide.
+msgp      = $F0             ; 2 - Msg* string pointer (survives BClearAll)
+st_land   = $F2             ; status bits a hit just inflicted (0 = none)
+st_who    = $F3             ; the combatant they landed on
+cur_tech  = $F4             ; tech id of the action being resolved
+hit_i     = $F5             ; all-target loop counter. NOT loop_i: ApplyDamage
+                            ; -> EraseEnemy stores the dead slot into loop_i,
+                            ; so an all-enemy tech that killed something walked
+                            ; its counter backwards and carried on damaging
+                            ; combatants 2 and 3 - the party's own back rank.
+; btl_scratch (ram.inc) is the per-round "has already taken poison" bitmask.
+
+; The statuses that survive the end of a battle. STUN / BLIND / SILENCE are
+; combat-only; POISON keeps biting until it is cured, and DOWN is death.
+ST_KEEP = ST_POISON|ST_DOWN
+
 .segment "BANK25"
 
 ; =============================================================================
@@ -57,6 +112,9 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
 ; =============================================================================
 ; A = formation id.
 .proc BattleEnter
+.ifdef TEST_FORCE_FORM
+    lda #TEST_FORCE_FORM        ; test builds pin every fight to one formation
+.endif
     sta btl_form
     lda #0
     sta btl_result
@@ -207,8 +265,18 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
     sta b_status,x
     lda party+c_eva,y
     sta b_evade,x
+.ifdef TEST_TANK_PARTY
+    lda #<999               ; test hook: the party cannot be killed, so a
+    sta b_hp,x              ; scripted run sees a long fight's worth of enemy
+    sta b_hpmax,x           ; turns instead of a level-1 party's two rounds
+    lda #>999
+    sta b_hp+8,x
+    sta b_hpmax+8,x
+.endif
     lda #0
     sta b_guard,x
+    sta b_elem,x            ; party members have no elemental weakness, and
+                            ; TechDamageOne reads this for every target
     lda party+c_hp,y
     ora party+c_hp+1,y
     beq @dead
@@ -640,6 +708,10 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
 .endproc
 
 ; Compose HUD line loop_i into linebuf.
+;
+; HP comes from the combatant arrays, NOT from the save record: the record is
+; only written back when the battle ends, so reading it here froze the HUD at
+; the HP the party walked in with for the whole fight.
 .proc HudLine
     ldx #0
     lda #0
@@ -662,33 +734,26 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
     jsr NameToPtr
     ldx #1
     jsr PutString
+    ; status tag, one letter, in the gap between the name and the HP
+    ldy loop_i
+    lda b_status,y
+    jsr StatusLetter
+    sta linebuf+8
     ; HP
     ldx #10
-    lda loop_i
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    tay
-    lda party+c_hp,y
+    ldy loop_i
+    lda b_hp,y
     sta num_lo
-    lda party+c_hp+1,y
+    lda b_hp+8,y
     sta num_hi
     jsr PutNumber
     lda #46                 ; '/' in the font charset
     sta linebuf,x
     inx
-    lda loop_i
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    tay
-    lda party+c_hpmax,y
+    ldy loop_i
+    lda b_hpmax,y
     sta num_lo
-    lda party+c_hpmax+1,y
+    lda b_hpmax+8,y
     sta num_hi
     jsr PutNumber
     ; TP
@@ -706,6 +771,23 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
     sta num_hi
     jsr PutNumber
 @done:
+    rts
+.endproc
+
+; A = a status byte -> A = the font tile of its one-letter HUD tag (0 = none).
+; The lowest set bit wins, so POISON is reported ahead of SILENCE.
+.proc StatusLetter
+    ldx #0
+@lp:
+    lsr a
+    bcs @got
+    inx
+    cpx #4
+    bcc @lp
+    lda #0
+    rts
+@got:
+    lda status_letters,x
     rts
 .endproc
 
@@ -748,6 +830,8 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
 .segment "BANK25"
 enemy_x:  .byte 3, 11, 19, 26
 enemy_y:  .byte 4, 8, 4, 9
+; POISON / STUN / BLIND / SILENCE, in ST_* bit order
+status_letters: .byte "PTBS"
 batt_pal:
     .byte $0F,$16,$27,$30
     .byte $0F,$11,$21,$30
@@ -879,18 +963,30 @@ BOX_ROW = 20
     jmp WriteRowSegs
 .endproc
 
-.proc BClearAll
-    lda #0
+; A = first interior line: blank it and every line below it.
+;
+; Messages compose from the top down and finish with this, so each of the four
+; interior lines is written exactly once. Blanking all four up front and then
+; drawing over them cost seven row packets, and VBUF only holds six - the
+; seventh was dropped, which is why a status line never appeared.
+.proc BlankRest
     sta loop_j
 @lp:
+    lda loop_j
+    cmp #4
+    bcs @done
     jsr BClear
     lda loop_j
     jsr BPut
     inc loop_j
-    lda loop_j
-    cmp #4
-    bcc @lp
+    jmp @lp
+@done:
     rts
+.endproc
+
+.proc BClearAll
+    lda #0
+    jmp BlankRest
 .endproc
 
 ; ptr = string, X = column: copy into linebuf.
@@ -1158,7 +1254,15 @@ BOX_ROW = 20
     jsr DrawCmdCursor
     rts
 @choose:
-    lda #SFX_CONFIRM
+    ldx btl_actor
+    lda menu_cursor
+    cmp #CMD_TECH           ; a silenced character cannot reach their techs
+    bne :+
+    lda b_status,x
+    and #ST_SILENCE
+    beq :+
+    rts                     ; refused: the command menu stays up
+:   lda #SFX_CONFIRM
     sta sfx_req
     ldx btl_actor
     lda menu_cursor
@@ -1747,6 +1851,7 @@ BOX_ROW = 20
 
     lda #0
     sta ord_i
+    sta btl_scratch         ; nobody has taken their poison damage this round
     inc btl_round
     lda #BP_RESOLVE
     sta btl_phase
@@ -1780,18 +1885,65 @@ BOX_ROW = 20
     tax
     lda b_alive,x
     beq PhResolve           ; skip the dead
+    ; poison bites at the start of its sufferer's turn, once per round. The
+    ; message costs a tick, so ord_i is wound back and the actor is picked
+    ; again next tick - this time with its bit in btl_scratch already set.
+    lda b_status,x
+    and #ST_POISON
+    beq @nopoison
+    lda bitmask,x
+    and btl_scratch
+    bne @nopoison
+    lda bitmask,x
+    ora btl_scratch
+    sta btl_scratch
+    dec ord_i
+    jmp PoisonTick
+@nopoison:
     lda b_status,x
     and #ST_STUN
     beq :+
-    lda #0
-    sta b_status,x          ; stun wears off, turn is lost
-    jmp PhResolve
-:   lda btl_actor
+    lda b_status,x
+    and #(255-ST_STUN)      ; stun wears off, turn is lost, the rest stays
+    sta b_status,x
+    jmp MsgStunned
+:   lda #0
+    sta st_land             ; no status has landed yet this action
+    lda btl_actor
     cmp #4
     bcs @enemy
     jmp PartyAction
 @enemy:
     jmp EnemyAction
+.endproc
+
+; The acting combatant loses HP to poison: hpmax/8, never less than 1.
+.proc PoisonTick
+    lda btl_actor
+    sta btl_target
+    tay
+    lda b_hpmax+8,y
+    sta tmp1
+    lda b_hpmax,y
+    sta tmp0
+    ldx #3
+:   lsr tmp1
+    ror tmp0
+    dex
+    bne :-
+    lda tmp0
+    ora tmp1
+    bne :+
+    lda #1
+    sta tmp0
+:   lda tmp0
+    sta dmg_lo
+    lda tmp1
+    sta dmg_hi
+    jsr ApplyDamage
+    lda #<s_poisonhit
+    ldx #>s_poisonhit
+    jmp MsgActorDmg         ; PhMsg refreshes the HUD row when it clears
 .endproc
 
 ; --- party actions -----------------------------------------------------------
@@ -1822,6 +1974,7 @@ BOX_ROW = 20
     lda #1
     sta b_guard,x
     lda #<s_guards
+    ldx #>s_guards
     jmp MsgActor
 @run:
     jsr TryRun
@@ -1851,7 +2004,12 @@ BOX_ROW = 20
     bcs :+
     lda #40
 :   sta tmp2
-    jsr Random
+    ldx btl_actor           ; blinded attackers hit half as often
+    lda b_status,x
+    and #ST_BLIND
+    beq :+
+    lsr tmp2
+:   jsr Random
     sta div_n
     lda #100
     sta div_d
@@ -1860,6 +2018,7 @@ BOX_ROW = 20
     cmp tmp2
     bcc @hit
     lda #<s_misses
+    ldx #>s_misses
     jmp MsgActorTarget
 @hit:
     ; base = atk - def/2, at least 1
@@ -1921,6 +2080,7 @@ BOX_ROW = 20
     ror dmg_lo
 :   jsr ApplyDamage
     lda #<s_hits
+    ldx #>s_hits
     jsr MsgActorTargetDmg
     rts
 .endproc
@@ -2032,13 +2192,163 @@ BOX_ROW = 20
 .endproc
 
 ; --- enemy actions -----------------------------------------------------------
+; Dispatch on the monster's `ai` byte. Everything a monster does goes through
+; the same routines the party uses, so elements, resistance, guarding and
+; status all behave identically whichever side is acting.
 .proc EnemyAction
+.ifdef TEST_AI_OFF
+    jmp @attack                 ; the control build: every enemy just swings,
+.endif                          ; which is what the engine did before this
+    lda btl_actor
+    jsr EnemyRecPtr
+    ldy #M_AI
+    lda (srcp),y
+    beq @attack                 ; AI_MELEE
+    sta tmp7
+    ldx btl_actor
+    lda b_status,x
+    and #ST_SILENCE             ; a silenced caster can only swing
+    bne @attack
+    lda tmp7
+    cmp #AI_CASTER
+    beq @caster
+    jsr Random
+    cmp #AI_MIXED_ODDS
+    bcs @attack
+    jmp EnemyTech
+@caster:
+    jsr Random
+    cmp #AI_CASTER_ODDS
+    bcs @attack
+    jmp EnemyTech
+@attack:
     jsr PickLivePartyMember
     bcs :+
     rts
 :   sta btl_target
     jsr PhysicalAttack
     rts
+.endproc
+
+; A = an enemy combatant index (4..7) -> srcp = its monster record.
+; Clobbers X. Every enemy slot is one of the formation's two types, so the
+; record is already in RAM; nothing here touches the data bank.
+.proc EnemyRecPtr
+    sec
+    sbc #4
+    tax
+    lda btl_slot_type,x
+    beq @first
+    lda #<mon_rec2
+    sta srcp
+    lda #>mon_rec2
+    sta srcp+1
+    rts
+@first:
+    lda #<mon_rec
+    sta srcp
+    lda #>mon_rec
+    sta srcp+1
+    rts
+.endproc
+
+; The acting enemy uses its special tech.
+.proc EnemyTech
+    lda btl_actor
+    jsr EnemyRecPtr
+    ldy #M_SPEC
+    lda (srcp),y
+    sta cur_tech
+    jsr TechRec
+    lda tech_rec+K_TARGET
+    cmp #2                      ; TG_ONE_ALLY and up: it mends its own side
+    bcs EnemyMend
+    ; damage = power + SPI/2, exactly as CastTech computes it
+    lda tech_rec+K_POWER
+    sta tmp0
+    ldx btl_actor
+    lda b_spi,x
+    lsr a
+    clc
+    adc tmp0
+    sta tmp6                    ; kept: the all-target loop reloads it
+    lda tech_rec+K_TARGET
+    cmp #1                      ; TG_ALL_ENEMY = the whole party
+    beq @all
+    jsr PickLivePartyMember
+    bcs :+
+    rts
+:   sta btl_target
+    lda tmp6
+    sta dmg_lo
+    lda #0
+    sta dmg_hi
+    jsr TechDamageOne
+    lda #<s_uses
+    ldx #>s_uses
+    jmp MsgTechDmg
+@all:
+    ldx #0
+@lp:
+    stx hit_i
+    lda b_alive,x
+    beq @next
+    stx btl_target
+    lda tmp6
+    sta dmg_lo
+    lda #0
+    sta dmg_hi
+    jsr TechDamageOne
+@next:
+    ldx hit_i
+    inx
+    cpx #4
+    bcc @lp
+    lda #<s_uses
+    ldx #>s_uses
+    jmp MsgTechAll
+.endproc
+
+; A support special: heal every living enemy. With nothing hurt to heal there
+; is no point casting, so the monster swings instead.
+.proc EnemyMend
+    ldx #4
+@scan:
+    lda b_alive,x
+    beq @scannext
+    lda b_hp,x
+    cmp b_hpmax,x
+    lda b_hp+8,x
+    sbc b_hpmax+8,x
+    bcc @heal                   ; hp < hpmax somewhere: worth casting
+@scannext:
+    inx
+    cpx #8
+    bcc @scan
+    jsr PickLivePartyMember     ; nothing to mend: fall back to attacking
+    bcs :+
+    rts
+:   sta btl_target
+    jmp PhysicalAttack
+@heal:
+    lda tech_rec+K_POWER
+    sta tmp6
+    ldx #4
+@lp:
+    stx hit_i
+    lda b_alive,x
+    beq @next
+    lda tmp6
+    sta tmp0
+    jsr HealCombatant
+@next:
+    ldx hit_i
+    inx
+    cpx #8
+    bcc @lp
+    lda #<s_mends
+    ldx #>s_mends
+    jmp MsgTechAll
 .endproc
 
 ; -> A = a living party member, carry set if one exists.
@@ -2091,6 +2401,7 @@ BOX_ROW = 20
     and #1
     beq :+
     lda #<s_norun
+    ldx #>s_norun
     jmp MsgPlain
 :   jsr Random
     cmp #96
@@ -2100,9 +2411,11 @@ BOX_ROW = 20
     lda #BP_FLED
     sta btl_phase
     lda #<s_ranaway
+    ldx #>s_ranaway
     jmp MsgPlainPhase
 @fail:
     lda #<s_ranfail
+    ldx #>s_ranfail
     jmp MsgPlain
 .endproc
 
@@ -2111,6 +2424,7 @@ BOX_ROW = 20
     ldx btl_actor
     lda act_arg,x
     sta tmp5
+    sta cur_tech
     jsr TechRec
     ; spend TP
     lda btl_actor
@@ -2122,15 +2436,15 @@ BOX_ROW = 20
     tay
     lda party+c_tp,y
     sec
-    sbc tech_rec+1
+    sbc tech_rec+K_COST
     bcs :+
     lda #0
 :   sta party+c_tp,y
-    lda tech_rec+4          ; target kind
+    lda tech_rec+K_TARGET
     cmp #2
     bcs @support
     ; offensive: power + spi/2, minus target spi/4
-    lda tech_rec+2
+    lda tech_rec+K_POWER
     sta tmp0
     ldx btl_actor
     lda b_spi,x
@@ -2140,22 +2454,31 @@ BOX_ROW = 20
     sta dmg_lo
     lda #0
     sta dmg_hi
-    lda tech_rec+4
+    lda tech_rec+K_TARGET
     cmp #1                  ; TG_ALL_ENEMY
     beq @all
     ldx btl_actor
     lda act_tgt,x
     sta btl_target
+    tay
+    lda b_alive,y
+    bne @fire
+    jsr PickLiveEnemy       ; the chosen target died earlier in the round
+    bcs @retarget
+    jmp @nofx
+@retarget:
+    sta btl_target
+@fire:
     jsr TechDamageOne
-    lda #<s_techhit
-    jsr MsgActorTargetDmg
-    rts
+    lda #<s_uses
+    ldx #>s_uses
+    jmp MsgTechDmg
 @all:
     lda dmg_lo
     sta tmp6
     ldx #4
 @alllp:
-    stx loop_i
+    stx hit_i
     lda b_alive,x
     beq @allnext
     stx btl_target
@@ -2165,16 +2488,37 @@ BOX_ROW = 20
     sta dmg_hi
     jsr TechDamageOne
 @allnext:
-    ldx loop_i
+    ldx hit_i
     inx
     cpx #8
     bcc @alllp
-    lda #<s_techall
-    jmp MsgActor
+    lda #<s_uses
+    ldx #>s_uses
+    jmp MsgTechAll
 @support:
-    ; healing: restore power HP to the whole party
-    lda tech_rec+2
-    beq @nofx
+    ; a support tech can cure, heal, or both; the whole party benefits either
+    ; way (the engine has never asked a support tech for a target).
+    lda #0
+    sta tmp7                ; did anything at all happen?
+    lda tech_rec+K_STATUS
+    beq @heal0
+    eor #$FF
+    sta tmp2                ; the bits to keep
+    ldx #0
+@curelp:
+    lda b_alive,x
+    beq @curenext
+    lda b_status,x
+    and tmp2
+    sta b_status,x
+@curenext:
+    inx
+    cpx #4
+    bcc @curelp
+    inc tmp7
+@heal0:
+    lda tech_rec+K_POWER
+    beq @done
     sta tmp0
     ldx #0
 @heal:
@@ -2183,18 +2527,29 @@ BOX_ROW = 20
     stx loop_i
     jsr HealCombatant
     ldx loop_i
+    lda tech_rec+K_POWER
+    sta tmp0
 @healnext:
     inx
     cpx #4
     bcc @heal
     lda #<s_healed
-    jmp MsgActor
+    ldx #>s_healed
+    jmp MsgTechAll
+@done:
+    lda tmp7
+    beq @nofx
+    lda #<s_cleanses
+    ldx #>s_cleanses
+    jmp MsgTechAll
 @nofx:
     lda #<s_noeffect
+    ldx #>s_noeffect
     jmp MsgActor
 .endproc
 
-; dmg_lo/hi = raw power; apply resistance and element, then damage btl_target.
+; dmg_lo/hi = raw power; apply resistance and element, then damage btl_target
+; and roll the tech's status onto it.
 .proc TechDamageOne
     ldy btl_target
     lda b_spi,y
@@ -2206,19 +2561,70 @@ BOX_ROW = 20
     sbc tmp1
     bcs :+
     lda #1
+:   bne :+
+    lda #1
 :   sta dmg_lo
     lda #0
     sta dmg_hi
     ; element: weakness doubles, immunity zeroes
+    lda tech_rec+K_ELEM
+    beq @apply                  ; elementless techs are never resisted
     ldy btl_target
-    lda tech_rec+3
-    beq @apply
     cmp b_elem,y
-    bne @apply
+    bne @immune
     asl dmg_lo
     rol dmg_hi
+    jmp @apply
+@immune:
+    lda btl_target
+    cmp #4
+    bcc @apply                  ; party members have no immunities
+    jsr EnemyRecPtr
+    ldy #M_IMM
+    lda (srcp),y
+    beq @apply
+    cmp tech_rec+K_ELEM
+    bne @apply
+    lda #0
+    sta dmg_lo
+    sta dmg_hi
 @apply:
-    jmp ApplyDamage
+    jsr ApplyDamage
+    jmp TryInflict
+.endproc
+
+; Roll the current tech's status mask onto btl_target at ST_ODDS, halved again
+; on a boss. Corpses cannot be poisoned.
+.proc TryInflict
+    lda tech_rec+K_STATUS
+    beq @done
+    sta tmp2
+    ldy btl_target
+    lda b_alive,y
+    beq @done
+    jsr Random
+    cmp #ST_ODDS
+    bcs @done
+    lda btl_target
+    cmp #4
+    bcc @land
+    jsr EnemyRecPtr
+    ldy #M_BOSS
+    lda (srcp),y
+    beq @land
+    jsr Random
+    cmp #128
+    bcs @done
+@land:
+    ldy btl_target
+    lda b_status,y
+    ora tmp2
+    sta b_status,y
+    lda tmp2
+    sta st_land
+    sty st_who
+@done:
+    rts
 .endproc
 
 ; X = combatant, tmp0 = amount.
@@ -2261,6 +2667,7 @@ BOX_ROW = 20
     cpx #32
     bcc @find
     lda #<s_noeffect
+    ldx #>s_noeffect
     jmp MsgActor
 @got:
     dec inv_ct,x
@@ -2287,24 +2694,49 @@ BOX_ROW = 20
     ldy #1
     lda (srcp),y
     sta tmp0                ; power
+    ldy #7
+    lda (srcp),y
+    sta tmp3                ; status mask (cure items)
     lda tmp2
     cmp #1
     beq @heal
+    cmp #2
+    beq @cure
     cmp #5
     beq @bomb
     lda #<s_noeffect
+    ldx #>s_noeffect
     jmp MsgActor
 @heal:
     ldx btl_actor
     jsr HealCombatant
     lda #<s_healed
+    ldx #>s_healed
+    jmp MsgActor
+@cure:
+    lda tmp3
+    eor #$FF
+    sta tmp3                ; the bits to keep
+    ldx #0
+@curelp:
+    lda b_alive,x
+    beq @curenext
+    lda b_status,x
+    and tmp3
+    sta b_status,x
+@curenext:
+    inx
+    cpx #4
+    bcc @curelp
+    lda #<s_cleanses
+    ldx #>s_cleanses
     jmp MsgActor
 @bomb:
     lda tmp0
     sta tmp6
     ldx #4
 @lp:
-    stx loop_i
+    stx hit_i
     lda b_alive,x
     beq @next
     stx btl_target
@@ -2314,11 +2746,12 @@ BOX_ROW = 20
     sta dmg_hi
     jsr ApplyDamage
 @next:
-    ldx loop_i
+    ldx hit_i
     inx
     cpx #8
     bcc @lp
     lda #<s_techall
+    ldx #>s_techall
     jmp MsgActor
 .endproc
 
@@ -2356,6 +2789,7 @@ BOX_ROW = 20
     lda #BP_DEFEAT
     sta btl_phase
     lda #<s_wiped
+    ldx #>s_wiped
     jsr MsgPlainPhase
 @done:
     rts
@@ -2425,7 +2859,8 @@ BOX_ROW = 20
     rts
 .endproc
 
-; Copy battle HP/status back into the save-file party records.
+; Copy battle HP/status back into the save-file party records. STUN, BLIND and
+; SILENCE end with the battle; POISON and DOWN are carried out of it.
 .proc WriteBackHp
     ldx #0
 @lp:
@@ -2441,6 +2876,7 @@ BOX_ROW = 20
     lda b_hp+8,x
     sta party+c_hp+1,y
     lda b_status,x
+    and #ST_KEEP
     sta party+c_status,y
     inx
     cpx #4
@@ -2839,10 +3275,16 @@ BOX_ROW = 20
     rts
 .endproc
 
+; One HUD row per message - the row of whoever was just hit if that was a party
+; member, otherwise the next one round-robin. One row is the budget: the message
+; itself has already spent most of this frame's VBUF on its four interior lines.
 .proc DrawHudRows
+    lda btl_target
+    cmp #4
+    bcc :+
     lda btl_round
     and #3
-    sta loop_i
+:   sta loop_i
     jsr HudLine
     lda #26
     clc
@@ -2860,7 +3302,6 @@ BOX_ROW = 20
 ; Battle messages
 ; =============================================================================
 .proc MsgAppeared
-    jsr BClearAll
     jsr BClear
     lda btl_type0
     jsr MonNameToPtr
@@ -2874,13 +3315,14 @@ BOX_ROW = 20
     jsr BStr
     lda #0
     jsr BPut
+    lda #1
+    jsr BlankRest
     lda #MSG_HOLD
     sta msg_timer
     rts
 .endproc
 
 .proc MsgVictory
-    jsr BClearAll
     jsr BClear
     lda #<s_victory
     sta ptr
@@ -2918,80 +3360,50 @@ BOX_ROW = 20
     jsr BStr
     lda #2
     jsr BPut
+    lda #3
+    jsr BlankRest
     lda #MSG_HOLD*2
     sta msg_timer
     rts
 .endproc
 
-; A = low byte of a string address in this bank; show "<actor> <string>".
-.proc MsgActor
-    sta tmpc
-    jsr BClearAll
-    jsr BClear
-    lda btl_actor
-    jsr CombatantName
-    ldx #1
-    jsr BStr
-    lda tmpc
-    sta ptr
-    lda #>s_hits
-    sta ptr+1
-    ldx #14
-    jsr BStr
-    lda #0
-    jsr BPut
-    jsr EndMsg
+; Every Msg* helper takes its string as A = low byte, X = high byte.
+;
+; They used to take the low byte alone and assume the high byte of s_hits. The
+; strings have long since grown past one page, so the three RUN messages - which
+; sit in the next page - were being fetched from the wrong address and printed
+; whatever happened to be there. Pass both bytes and the trap cannot come back.
+.proc StashStr
+    sta msgp
+    stx msgp+1
     rts
 .endproc
 
-.proc MsgActorTarget
-    sta tmpc
-    jsr BClearAll
-    jsr BClear
-    lda btl_actor
-    jsr CombatantName
-    ldx #1
-    jsr BStr
-    lda tmpc
+; ptr = the stashed string (BClearAll and CombatantName both eat ptr).
+.proc UseStr
+    lda msgp
     sta ptr
-    lda #>s_hits
+    lda msgp+1
     sta ptr+1
-    ldx #14
-    jsr BStr
-    lda #0
-    jsr BPut
-    jsr BClear
-    lda btl_target
-    jsr CombatantName
-    ldx #4
-    jsr BStr
-    lda #1
-    jsr BPut
-    jsr EndMsg
     rts
 .endproc
 
-.proc MsgActorTargetDmg
-    sta tmpc
-    jsr BClearAll
+; Interior line 0: "<actor> <string>".
+.proc ActorLine
     jsr BClear
     lda btl_actor
     jsr CombatantName
     ldx #1
     jsr BStr
-    lda tmpc
-    sta ptr
-    lda #>s_hits
-    sta ptr+1
+    jsr UseStr
     ldx #14
     jsr BStr
     lda #0
-    jsr BPut
-    jsr BClear
-    lda btl_target
-    jsr CombatantName
-    ldx #2
-    jsr BStr
+    jmp BPut
+.endproc
+
+; "FOR <dmg>" on the right of the line being composed.
+.proc DmgTail
     lda #<s_for
     sta ptr
     lda #>s_for
@@ -3003,42 +3415,196 @@ BOX_ROW = 20
     lda dmg_hi
     sta num_hi
     ldx #21
-    jsr PutNumber
+    jmp PutNumber
+.endproc
+
+; Show "<actor> <string>".
+.proc MsgActor
+    jsr StashStr
+    jsr ActorLine
+    lda #1
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+; ...with the target named underneath.
+.proc MsgActorTarget
+    jsr StashStr
+    jsr ActorLine
+    jsr BClear
+    lda btl_target
+    jsr CombatantName
+    ldx #4
+    jsr BStr
     lda #1
     jsr BPut
-    jsr EndMsg
+    lda #2
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+; ...with the target and the damage underneath.
+.proc MsgActorTargetDmg
+    jsr StashStr
+    jsr ActorLine
+    jsr BClear
+    lda btl_target
+    jsr CombatantName
+    ldx #2
+    jsr BStr
+    jsr DmgTail
+    lda #1
+    jsr BPut
+    jsr MsgStatusLine
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+; ...with only the damage underneath (poison, which has no attacker).
+.proc MsgActorDmg
+    jsr StashStr
+    jsr ActorLine
+    jsr BClear
+    jsr DmgTail
+    lda #1
+    jsr BPut
+    lda #2
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+; A tech: "<actor> USES" / "<tech> FOR <dmg>". Naming the tech is what makes an
+; enemy caster read as a caster rather than as an oddly strong punch.
+.proc MsgTechDmg
+    jsr StashStr
+    jsr ActorLine
+    jsr BClear
+    lda cur_tech
+    jsr TechNameToPtr
+    ldx #2
+    jsr BStr
+    jsr DmgTail
+    lda #1
+    jsr BPut
+    jsr MsgStatusLine
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+; The same, for a tech that hit everything (or healed) and has no one number.
+.proc MsgTechAll
+    jsr StashStr
+    jsr ActorLine
+    jsr BClear
+    lda cur_tech
+    jsr TechNameToPtr
+    ldx #2
+    jsr BStr
+    lda #1
+    jsr BPut
+    jsr MsgStatusLine
+    jsr BlankRest
+    jmp EndMsg
+.endproc
+
+.proc MsgStunned
+    lda #<s_stunned
+    ldx #>s_stunned
+    jmp MsgActor
+.endproc
+
+; Interior line 2: "<victim> IS <STATUS>", when the last hit landed one.
+; -> A = the first interior line still to be blanked.
+.proc MsgStatusLine
+    lda st_land
+    beq @done
+    jsr BClear
+    lda st_who
+    jsr CombatantName
+    ldx #2
+    jsr BStr
+    lda #<s_is
+    sta ptr
+    lda #>s_is
+    sta ptr+1
+    ldx #15
+    jsr BStr
+    lda st_land
+    jsr StatusWordPtr
+    ldx #18
+    jsr BStr
+    lda #2
+    jsr BPut
+    lda #3
+    rts
+@done:
+    lda #2
+    rts
+.endproc
+
+; A = a status mask -> ptr = the name of its lowest set bit.
+.proc StatusWordPtr
+    ldx #0
+@lp:
+    lsr a
+    bcs @got
+    inx
+    cpx #4
+    bcc @lp
+    ldx #0
+@got:
+    txa
+    asl a
+    tax
+    lda status_words,x
+    sta ptr
+    lda status_words+1,x
+    sta ptr+1
+    rts
+.endproc
+
+; A = tech id -> ptr = its name.
+.proc TechNameToPtr
+    sta mul_a
+    lda #NAME_LEN
+    sta mul_b
+    jsr Mul8
+    lda #BANK_TABLES
+    jsr SetPrgData
+    lda mul_res
+    clc
+    adc #<tech_names
+    sta ptr
+    lda mul_res+1
+    adc #>tech_names
+    sta ptr+1
     rts
 .endproc
 
 .proc MsgPlain
-    sta tmpc
-    jsr BClearAll
+    jsr StashStr
     jsr BClear
-    lda tmpc
-    sta ptr
-    lda #>s_hits
-    sta ptr+1
+    jsr UseStr
     ldx #1
     jsr BStr
     lda #0
     jsr BPut
-    jsr EndMsg
-    rts
+    lda #1
+    jsr BlankRest
+    jmp EndMsg
 .endproc
 
 ; As MsgPlain but leaves btl_phase alone (used for terminal messages).
 .proc MsgPlainPhase
-    sta tmpc
-    jsr BClearAll
+    jsr StashStr
     jsr BClear
-    lda tmpc
-    sta ptr
-    lda #>s_hits
-    sta ptr+1
+    jsr UseStr
     ldx #1
     jsr BStr
     lda #0
     jsr BPut
+    lda #1
+    jsr BlankRest
     lda #MSG_HOLD
     sta msg_timer
     rts
@@ -3069,10 +3635,24 @@ cmd_row:  .byte 1, 1, 1, 2, 2
 cmd_col:  .byte 1, 9, 17, 1, 9
 bitmask:  .byte 1, 2, 4, 8, 16, 32, 64, 128
 
+; Message strings. These no longer have to share a page: every Msg* helper
+; takes a full 16-bit pointer.
+status_words:
+    .addr s_st_pois, s_st_stun, s_st_blind, s_st_sil
+
 s_hits:     .byte "ATTACKS!", STR_END
 s_misses:   .byte "MISSES.", STR_END
 s_guards:   .byte "GUARDS.", STR_END
-s_techhit:  .byte "USES A TECH!", STR_END
+s_uses:     .byte "USES", STR_END
+s_mends:    .byte "MENDS ITS OWN", STR_END
+s_cleanses: .byte "CLEANSES!", STR_END
+s_stunned:  .byte "IS STUNNED.", STR_END
+s_poisonhit: .byte "TAKES POISON", STR_END
+s_is:       .byte "IS", STR_END
+s_st_pois:  .byte "POISONED!", STR_END
+s_st_stun:  .byte "STUNNED!", STR_END
+s_st_blind: .byte "BLINDED!", STR_END
+s_st_sil:   .byte "SILENCED!", STR_END
 s_techall:  .byte "STRIKES ALL!", STR_END
 s_healed:   .byte "MENDS THE PARTY.", STR_END
 s_noeffect: .byte "NO EFFECT.", STR_END
@@ -3116,7 +3696,8 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     cpy #PARTY_SIZE
     bne :-
     ldx tmp3
-    lda lvl_i               ; class = slot (SOLDIER RANGER MEDIC PSION)
+    ldy lvl_i               ; the class picked at the muster (X holds the
+    lda party_class,y       ; record offset, so the lookup has to use Y)
     sta party+c_class,x
     sta party+c_name,x
     lda #1

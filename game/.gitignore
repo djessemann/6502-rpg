@@ -1,0 +1,5 @@
+*.o
+*.nes
+*.dbg
+test/shots/
+__pycache__/

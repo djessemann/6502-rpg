@@ -9,6 +9,7 @@
 .include "gen/charmap.inc"
 .include "gen/msgids.inc"
 .include "gen/dataids.inc"
+.include "gen/songids.inc"
 
 .import SetPrgData, SetChrBank, PpuAddr, PpuFill, LoadPalette, Random
 .import Div8, VBufAlloc, ScreenOff, ScreenOn, ClearNametables
@@ -78,12 +79,19 @@ OB_TRIG  = 8
     jsr InitParty
 
 .ifdef TEST_START_DUNGEON
-    lda #TEST_START_DUNGEON     ; test builds boot straight into a dungeon
+    lda #TEST_START_DUNGEON     ; test builds boot straight into a map
     jsr LoadMap
+.ifdef TEST_START_X
+    lda #TEST_START_X           ; ...optionally at a chosen cell, so a test can
+    sta ent_gx                  ; exercise one object without a long walk
+    lda #TEST_START_Y
+    sta ent_gy
+.else
     lda #12                     ; every area map is entered at (12,18)
     sta ent_gx
     lda #18
     sta ent_gy
+.endif
 .else
     lda #0                      ; the overworld
     jsr LoadMap
@@ -344,6 +352,8 @@ OB_TRIG  = 8
     beq @talk
     cmp #OB_CHEST
     beq @chest
+    cmp #OB_INN
+    beq @inn
 @nobody:
     lda #MSG_SYS_NOTHING
     jmp ShowMessage
@@ -352,6 +362,76 @@ OB_TRIG  = 8
     jmp ShowMessage
 @chest:
     jmp OpenChest
+@inn:
+    jmp UseInn
+.endproc
+
+; =============================================================================
+; Inns
+; =============================================================================
+; X = the inn's entity slot. a0/a1 = price, a2 = the innkeeper's message.
+; Resting restores every member to full HP and TP and clears their status.
+.proc UseInn
+    lda ent_tile,x              ; price low
+    sta pend_lo
+    lda ent_dir,x               ; price high
+    sta pend_hi
+    lda credits+2               ; afford it? (24-bit purse vs 16-bit price)
+    bne @afford
+    lda credits+1
+    cmp pend_hi
+    bcc @poor
+    bne @afford
+    lda credits
+    cmp pend_lo
+    bcc @poor
+@afford:
+    lda credits
+    sec
+    sbc pend_lo
+    sta credits
+    lda credits+1
+    sbc pend_hi
+    sta credits+1
+    lda credits+2
+    sbc #0
+    sta credits+2
+    jsr RestParty
+    lda #SFX_HEAL
+    sta sfx_req
+    lda #1                      ; the second line shows what it cost
+    sta pend_kind
+    lda #MSG_SYS_REST_DONE
+    jmp ShowMessage
+@poor:
+    lda #0
+    sta pend_kind
+    lda #MSG_SYS_NO_CREDITS
+    jmp ShowMessage
+.endproc
+
+.proc RestParty
+    ldx #0
+@lp:
+    txa
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tay
+    lda party+c_hpmax,y
+    sta party+c_hp,y
+    lda party+c_hpmax+1,y
+    sta party+c_hp+1,y
+    lda party+c_tpmax,y
+    sta party+c_tp,y
+    lda #0
+    sta party+c_status,y
+    inx
+    cpx #4
+    bcc @lp
+    rts
 .endproc
 
 ; =============================================================================

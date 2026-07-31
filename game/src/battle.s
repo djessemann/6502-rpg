@@ -3181,7 +3181,11 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     sta inv_id+1
     lda #2
     sta inv_ct+1
+.ifdef TEST_NO_CREDITS
+    lda #0                      ; test build: a party that cannot afford an inn
+.else
     lda #200
+.endif
     sta credits
     lda #0
     sta credits+1

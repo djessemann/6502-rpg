@@ -16,6 +16,8 @@ python3 test/t_field.py    # scrolling, movement
 python3 test/t_text.py     # window open/close over the map
 python3 test/t_town.py     # overworld -> Landfall warp
 python3 test/t_sound.py    # driver liveness + negative control
+python3 test/t_chest.py    # opening a chest, and its flag sticking
+python3 test/t_inn.py      # resting, and being refused when broke
 python3 tools/check_areas.py    # every area map: reachability, objects, ids
 python3 tools/music_check.py    # song data vs the bytes in the built ROM
 ```
@@ -121,8 +123,9 @@ classes 0-3), and `OB_SAVE` handling in the field. Make `GameInit` boot to the
 title instead of straight into the overworld.
 
 **2. Field menus.** New code bank 27. START opens status / item / equip / tech.
-The shop, inn and save objects already exist on all six town maps
-(`OB_SHOP` carries a shop id into `shop_tab`, `OB_INN` a price) and
+Inns are **done** (`UseInn` in `field.s`); shops and save terminals are not.
+The shop and save objects already exist on all six town maps
+(`OB_SHOP` carries a shop id into `shop_tab`) and
 `FindObject`/`TalkOrAct` in `field.s` already locates them — they currently
 fall through to "nothing happens". `battle.s` has working list-selection code
 to copy (`BuildTechList`, `StartItemSel`, and the `UiFlush` pacer).
@@ -153,7 +156,8 @@ agents on balance and on the engine's remaining scratch-register discipline.
   `prop` table the BFS reads. The test reports this as `info` rather than
   asserting it; make it an assertion once it is understood. This is the first
   thing to look at, because a scripted playthrough (task 10) needs long walks
-  to be reliable.
+  to be reliable. `t_inn.py` sidesteps it with `-D TEST_START_X/Y`, which drops
+  the party on a chosen cell; use that for object tests, not for pathing ones.
 - **Cinder 1's south-west wing is a cul-de-sac through the exit.** From the
   entrance you can reach 371 of 372 walkable cells, but from the chest at
   (4,24) only 77 — the wing's only link to the rest of the floor is the
@@ -164,6 +168,9 @@ agents on balance and on the engine's remaining scratch-register discipline.
 
 ## Known rough edges
 
+- The inn rests the party the moment you talk to it, with no yes/no prompt --
+  a confirm step wants a small menu state, which the field engine does not have
+  yet. Add it with the field menus.
 - Chest loot lives in `CHEST_LOOT` in `tools/areas.py`, keyed by chest flag id
   (chests are numbered in build order). 24 of the 65 chests carry gear; the
   rest carry credits.

@@ -11,7 +11,7 @@
 .include "ram.inc"
 .include "banks.inc"
 
-.import TitleEnter, TitleTick
+.import TitleEnter, TitleTick, SaveGame, LoadGame
 .export GameInit, GameFrame
 .export RowSlot, DecodeRow, BuildRowStrip, AttrRowShadow, QueueAttrRow
 .export AttrRowForce
@@ -22,6 +22,9 @@
 ; TEST_NO_TITLE builds the same ROM with the title module never called: the
 ; negative control t_titlescreen.py measures its boot frame against.
 .proc GameInit
+.ifdef TEST_SAVE_ROUNDTRIP
+    jmp SaveRoundTrip
+.endif
 .ifndef TEST_NO_TITLE
     lda #TITLE_BANK
     jsr SetPrgCode
@@ -51,6 +54,97 @@
 .proc StartLoadedGame
     lda #$12                    ; blue
     jmp Halt
+.endproc
+
+; The save file, end to end, without a terminal to talk to: write a pattern
+; over the live state, save it, scribble the live state, load it back, and
+; compare. Halts green on a match, red on a mismatch, amber if the file did not
+; checksum at all.
+;
+; This proves the copy and the checksum. It does NOT prove that the battery
+; survives a power cycle -- pyntendo has no cartridge-battery file, so nothing
+; here can. The ROM's iNES header sets the battery bit (flags6 = $43), which is
+; what makes FCEUX and Mesen write a .sav; verifying that end of it needs one
+; of those emulators.
+.proc SaveRoundTrip
+    jsr Pattern                 ; a pattern no zero-fill can imitate
+    lda #TITLE_BANK
+    jsr SetPrgCode
+    jsr SaveGame
+
+    lda #$00                    ; wreck the live state, but not the slot
+    jsr FillLive
+
+.ifdef TEST_CORRUPT_SAVE
+    inc slot_data+9             ; one bit-flip in the file: the checksum must
+.endif                          ; notice, and LoadGame must refuse
+
+    lda #TITLE_BANK
+    jsr SetPrgCode
+    jsr LoadGame
+    bcc @nofile
+
+    ldx #0
+@cmp0:
+    txa
+    eor #$5A
+    cmp sav_version,x
+    bne @bad
+    inx
+    bne @cmp0
+    ldx #0
+@cmp1:
+    txa
+    eor #$A5
+    cmp sav_version+256,x
+    bne @bad
+    inx
+    cpx #SLOT_LEN-256
+    bne @cmp1
+    lda #$2A                    ; green: restored byte for byte
+    jmp Halt
+@bad:
+    lda #$16                    ; red
+    jmp Halt
+@nofile:
+    lda #$28                    ; amber: saved, then would not checksum
+    jmp Halt
+.endproc
+
+; Exactly the SLOT_LEN bytes the save file covers -- 506, not 512. Writing two
+; whole pages would run into slot_magic and make this test pass or fail for the
+; wrong reason.
+.proc Pattern
+    ldx #0
+:   txa
+    eor #$5A
+    sta sav_version,x
+    inx
+    bne :-
+    ldx #0
+:   txa
+    eor #$A5
+    sta sav_version+256,x
+    inx
+    cpx #SLOT_LEN-256
+    bne :-
+    rts
+.endproc
+
+.proc FillLive
+    sta tmp1
+    ldx #0
+:   lda tmp1
+    sta sav_version,x
+    inx
+    bne :-
+    ldx #0
+:   lda tmp1
+    sta sav_version+256,x
+    inx
+    cpx #SLOT_LEN-256
+    bne :-
+    rts
 .endproc
 
 .proc Halt

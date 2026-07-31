@@ -45,6 +45,15 @@ def lit(frame, r0, r1):
     return int((band.sum(axis=2) > 40).sum())
 
 
+# The halt colours the stub uses, looked up in the emulator's own palette
+# rather than written out as RGB triples -- pyntendo does not use the canonical
+# NES palette, and hand-guessed constants made this test fail on a pass.
+from nes.pycore.ppu import NESPPU                                 # noqa: E402
+NES_RGB = NESPPU.DEFAULT_NES_PALETTE
+GREEN, RED, AMBER, BLUE = (NES_RGB[0x2A], NES_RGB[0x16],
+                           NES_RGB[0x28], NES_RGB[0x12])
+
+
 def flat(frame):
     """The single colour of a uniform frame, or None."""
     u = np.unique(np.asarray(frame).reshape(-1, 3), axis=0)
@@ -118,10 +127,37 @@ r.shot("ts_5_ready")
 r.tap(A, 3, 60)
 r.idle(20)
 r.shot("ts_6_planetfall")
-check(flat(r.frame) == (99, 196, 70),
+check(flat(r.frame) == GREEN,
       "MAKE PLANETFALL hands off to the field entry point",
       f"the ready screen did not reach StartNewGame (frame is {flat(r.frame)}, "
       f"expected the stub's flat green)")
+
+
+# --- the save file: write it, wreck the live state, read it back -------------
+# The stub does the whole round trip in GameInit and halts on a colour.
+# Also build a control whose checksum is deliberately wrong, so "the file
+# loaded" cannot be a routine that always says yes.
+RT = OUT / "title_roundtrip.nes"
+build(RT, ["-D", "TEST_SAVE_ROUNDTRIP=1"])
+rr = Run(rom=RT)
+rr.idle(30)
+rr.shot("ts_7_saveload")
+colour = flat(rr.frame)
+check(colour == GREEN,
+      "the save file round-trips: 506 bytes out, wrecked, and back byte for byte",
+      f"the save round trip halted on {colour} - {GREEN} green is a match, "
+      f"{RED} red is a mismatch, {AMBER} amber means the file it had just "
+      f"written would not checksum")
+
+BAD = OUT / "title_badsum.nes"
+build(BAD, ["-D", "TEST_SAVE_ROUNDTRIP=1", "-D", "TEST_CORRUPT_SAVE=1"])
+rb = Run(rom=BAD)
+rb.idle(30)
+rb.shot("ts_8_badsum")
+check(flat(rb.frame) == AMBER,
+      "a save whose checksum no longer matches is refused",
+      f"a corrupted save was accepted (halted on {flat(rb.frame)}, expected "
+      f"{AMBER} amber) - the checksum is not being checked")
 
 print("PASS" if ok else "FAILED")
 sys.exit(0 if ok else 1)

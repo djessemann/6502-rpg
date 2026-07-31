@@ -36,6 +36,7 @@ box_saved      = $0587
 misc_bss       = $0588      ; ...spare through $059F
 pal_buf        = $05A0      ; 32: assembled palette (16 BG tileset + 16 sprite)
 mcol_buf       = $05C0      ; 16: metatile ids of one column slice
+digits         = $05D0      ;  6: decimal digit scratch for PutNumber
 
 ; Field entities (struct-of-arrays). Index 0 = the party leader.
 MAX_ENT        = 12

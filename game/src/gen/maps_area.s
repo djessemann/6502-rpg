@@ -4,7 +4,7 @@ TS_OVERWORLD = 0
 TS_TOWN = 1
 TS_DUNGEON = 2
 
-.segment "BANK03"
+.segment "BANK04"
 .export map_LANDFALL
 .export map_EMBERREST
 .export map_KELPHOLD

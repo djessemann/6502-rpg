@@ -192,3 +192,13 @@ atr_row       = $BC
 atr_qy        = $BD
 mcol_mx       = $BE     ; metatile column cached in mcol_buf ($FF = none)
 strm_dir      = $BF
+
+; --- window / text job ($C0-$CF) ---------------------------------------------
+job_step      = $C0
+draw_mode     = $C1     ; 0 = opening the window, 1 = closing it
+msg_id        = $C3
+talk_ent      = $C4
+box_ctx       = $C5
+box_done      = $C6
+box_row_i     = $C7     ; window job: current screen row (tmpd is not safe:
+box_cnt       = $C8     ; BuildRowStrip and AttrRowCore both use tmpd)

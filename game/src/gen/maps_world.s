@@ -3,7 +3,7 @@
 TS_OVERWORLD = 0
 TS_TOWN = 1
 TS_DUNGEON = 2
-.segment "BANK07"
+.segment "BANK08"
 .export map_OVERWORLD
 
 ; ---- OVERWORLD: 128x128, 14 objects ----

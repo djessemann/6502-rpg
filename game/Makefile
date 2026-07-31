@@ -9,11 +9,13 @@ SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/kernel.s \
            $(SRCDIR)/sound.s \
            $(SRCDIR)/field.s \
+           $(SRCDIR)/text.s \
            $(GENDIR)/chr.s \
            $(GENDIR)/tables.s \
            $(GENDIR)/tilesets.s \
            $(GENDIR)/maps_world.s \
-           $(GENDIR)/maps_area.s
+           $(GENDIR)/maps_area.s \
+           $(GENDIR)/text.s
 
 OBJS    := $(SRCS:.s=.o)
 

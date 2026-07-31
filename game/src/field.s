@@ -7,6 +7,7 @@
 .include "ram.inc"
 .include "banks.inc"
 .include "gen/charmap.inc"
+.include "gen/msgids.inc"
 
 .import SetPrgData, SetChrBank, PpuAddr, PpuFill, LoadPalette, Random
 .import Div8, VBufAlloc, ScreenOff, ScreenOn, ClearNametables
@@ -15,7 +16,10 @@
 
 .export GameInit, GameFrame
 .export LoadMap, DecodeRow, CellAt, DrawFullMap, UpdateCamera
-.export CellProp
+.export CellProp, RowSlot, BuildRowStrip, AttrRowShadow, AttrRowForce
+.export QueueAttrRow, SyncHeroPixels
+.import SetMessage, OpenBox, CloseBox, BoxStep, RenderLine
+.import DrawPrompt, ClearPrompt, RowSegs, WriteRowSegs, FillRowSegs
 
 DIR_UP    = 0
 DIR_DOWN  = 1
@@ -30,7 +34,25 @@ MOVE_SPEED = 2                  ; pixels per frame (16px cell = 8 frames)
 HERO_SX   = 120                 ; hero's fixed screen position
 HERO_SY   = 112
 
-GS_FIELD  = 0
+GS_FIELD    = 0
+GS_BOXOPEN  = 1
+GS_TEXT     = 2
+GS_TEXTWAIT = 3
+GS_DIALOG   = 4
+GS_BOXCLOSE = 5
+
+TEXT_ROW0   = 21
+TEXT_LINES  = 4
+
+; map object kinds (must match tools/maps.py)
+OB_NPC   = 1
+OB_CHEST = 2
+OB_WARP  = 3
+OB_SIGN  = 4
+OB_SHOP  = 5
+OB_INN   = 6
+OB_SAVE  = 7
+OB_TRIG  = 8
 
 .segment "ENGINE"
 
@@ -61,13 +83,251 @@ GS_FIELD  = 0
 .endproc
 
 ; =============================================================================
-; Per-frame
+; Per-frame: dispatch on gamestate through an RTS jump table
 ; =============================================================================
 .proc GameFrame
+    lda gamestate
+    asl a
+    tax
+    lda state_tab+1,x
+    pha
+    lda state_tab,x
+    pha
+    rts
+.endproc
+
+; --- GS_FIELD: walking -------------------------------------------------------
+.proc StField
     jsr UpdateHero
     jsr UpdateCamera
     jsr StreamCheck
     jsr BuildOAM
+    lda ent_state
+    bne @done                   ; only act when grid-aligned
+    lda pad1_new
+    and #BTN_A
+    beq @done
+    jsr TalkOrAct
+@done:
+    rts
+.endproc
+
+; --- GS_BOXOPEN / GS_BOXCLOSE: run the window job ---------------------------
+.proc StBoxOpen
+    jsr BoxStep
+    jsr BuildOAM
+    lda box_done
+    beq @done
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+@done:
+    rts
+.endproc
+
+.proc StBoxClose
+    jsr BoxStep
+    jsr BuildOAM
+    lda box_done
+    beq @done
+    lda #GS_FIELD
+    sta gamestate
+@done:
+    rts
+.endproc
+
+; --- GS_TEXT: one line per frame --------------------------------------------
+.proc StText
+    jsr BuildOAM
+    jsr RenderLine
+    lda cur_line
+    clc
+    adc #TEXT_ROW0
+    jsr RowSegs
+    jsr WriteRowSegs
+    inc cur_line
+    lda term_action
+    cmp #2
+    beq @end
+    cmp #1
+    beq @page
+    lda cur_line
+    cmp #TEXT_LINES
+    bcc @done
+@page:
+    lda #GS_TEXTWAIT
+    sta gamestate
+    jsr DrawPrompt
+    rts
+@end:
+    lda #GS_DIALOG
+    sta gamestate
+@done:
+    rts
+.endproc
+
+; --- GS_TEXTWAIT: page full, waiting for A ----------------------------------
+.proc StTextWait
+    jsr BuildOAM
+    lda pad1_new
+    and #BTN_A
+    beq @done
+    jsr ClearPrompt
+    lda #0
+    sta cur_line
+    lda #GS_TEXT
+    sta gamestate
+    jsr BlankInterior
+@done:
+    rts
+.endproc
+
+; --- GS_DIALOG: message finished, waiting for A -----------------------------
+.proc StDialog
+    jsr BuildOAM
+    lda pad1_new
+    and #BTN_A
+    beq @done
+    jsr CloseBox
+    lda #GS_BOXCLOSE
+    sta gamestate
+@done:
+    rts
+.endproc
+
+; Blank the four interior lines (they are redrawn line by line).
+.proc BlankInterior
+    lda #TEXT_ROW0
+    sta box_row_i
+    lda #TEXT_LINES
+    sta box_cnt
+@lp:
+    lda box_row_i
+    jsr RowSegs
+    lda #0
+    jsr FillRowSegs
+    inc box_row_i
+    dec box_cnt
+    bne @lp
+    rts
+.endproc
+
+; =============================================================================
+; Interaction: A in the field
+; =============================================================================
+; Look at the cell the leader faces; talk to an NPC or read a sign there.
+.proc TalkOrAct
+    lda ent_gx
+    sta tgt_gx
+    lda ent_gy
+    sta tgt_gy
+    lda ent_dir
+    cmp #DIR_UP
+    bne :+
+    dec tgt_gy
+    jmp @scan
+:   cmp #DIR_DOWN
+    bne :+
+    inc tgt_gy
+    jmp @scan
+:   cmp #DIR_LEFT
+    bne :+
+    dec tgt_gx
+    jmp @scan
+:   inc tgt_gx
+@scan:
+    jsr FindObject
+    bcc @nobody
+    ldx obj_i
+    lda ent_kind,x
+    cmp #OB_NPC
+    beq @talk
+    cmp #OB_SIGN
+    beq @talk
+    cmp #OB_SAVE
+    beq @talk
+@nobody:
+    lda #MSG_SYS_NOTHING
+    jmp ShowMessage
+@talk:
+    lda ent_arg,x
+    jmp ShowMessage
+.endproc
+
+; A = message id: open the window and start the message.
+.proc ShowMessage
+    jsr SetMessage
+    jsr OpenBox
+    lda #GS_BOXOPEN
+    sta gamestate
+    rts
+.endproc
+
+; Find a map object at (tgt_gx, tgt_gy). Carry set = found, obj_i = its slot.
+.proc FindObject
+    ldx #1
+@lp:
+    cpx ent_count
+    bcs @none
+    lda ent_kind,x
+    beq @next
+    lda ent_gx,x
+    cmp tgt_gx
+    bne @next
+    lda ent_gy,x
+    cmp tgt_gy
+    bne @next
+    stx obj_i
+    sec
+    rts
+@next:
+    inx
+    bne @lp
+@none:
+    clc
+    rts
+.endproc
+
+; =============================================================================
+; Warps
+; =============================================================================
+; Called when the leader lands on a new cell.
+.proc CheckWarp
+    lda ent_gx
+    sta tgt_gx
+    lda ent_gy
+    sta tgt_gy
+    jsr FindObject
+    bcc @none
+    ldx obj_i
+    lda ent_kind,x
+    cmp #OB_WARP
+    bne @none
+    lda ent_tile,x              ; a0 = destination map
+    pha
+    lda ent_dir,x               ; a1 = destination gx
+    sta tmpa
+    lda ent_arg,x               ; a2 = destination gy
+    sta tmpb
+    pla
+    jsr DoWarp
+@none:
+    rts
+.endproc
+
+; A = destination map, tmpa/tmpb = destination cell.
+.proc DoWarp
+    jsr LoadMap
+    lda tmpa
+    sta ent_gx
+    lda tmpb
+    sta ent_gy
+    lda #ST_IDLE
+    sta ent_state
+    jsr SyncHeroPixels
+    jsr UpdateCamera
+    jsr DrawFullMap
     rts
 .endproc
 
@@ -748,10 +1008,22 @@ GS_FIELD  = 0
 ; =============================================================================
 ; Attributes
 ; =============================================================================
+; A = metatile row, tmp6 = palette to force ($FF = take it from the map).
+.proc AttrRowForce
+    jmp AttrRowCore
+.endproc
+
 ; A = metatile row. Folds that row's palettes into the attribute shadows.
-; Requires mrow_buf0 to hold that row (BuildRowStrip leaves it there).
 .proc AttrRowShadow
+    ldy #$FF
+    sty tmp6
+    ; fall through
+.endproc
+
+.proc AttrRowCore
     sta tmpd                    ; MY
+    jsr DecodeRow               ; cached; needed for the map's palettes
+    lda tmpd
     asl a                       ; WY = MY*2
     jsr RowSlot
     sta tmpa                    ; r = WY mod 30
@@ -770,6 +1042,8 @@ GS_FIELD  = 0
     lda #0
     sta loop_j
 @lp:
+    lda tmp6
+    bpl @forced
     lda mt_col
     cmp map_w
     bcs @skip
@@ -777,6 +1051,10 @@ GS_FIELD  = 0
     lda mrow_buf0,y
     tay
     lda tset_attr,y
+    jmp @havepal
+@forced:
+    lda tmp6
+@havepal:
     sta tmpb                    ; palette 0..3
     ; nametable tile column of this metatile
     lda mt_col
@@ -845,8 +1123,9 @@ GS_FIELD  = 0
     inc loop_j
     lda loop_j
     cmp #32
-    bcc @lp
-    rts
+    bcs :+
+    jmp @lp
+:   rts
 .endproc
 
 ; =============================================================================
@@ -1392,6 +1671,7 @@ GS_FIELD  = 0
     sta ent_gx
     lda tgt_gy
     sta ent_gy
+    jsr CheckWarp
 @out:
     rts
 .endproc
@@ -1518,6 +1798,14 @@ HERO_TILE_SIDE = 16
 .endproc
 
 .segment "ENGRO"
+state_tab:
+    .addr StField-1
+    .addr StBoxOpen-1
+    .addr StText-1
+    .addr StTextWait-1
+    .addr StDialog-1
+    .addr StBoxClose-1
+
 dir_tile:  .byte HERO_TILE_UP, HERO_TILE_DOWN, HERO_TILE_SIDE, HERO_TILE_SIDE
 dir_attr:  .byte 0, 0, $40, 0
 slot_dx:   .byte 0, 8, 0, 8

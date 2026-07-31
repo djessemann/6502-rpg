@@ -20,6 +20,8 @@
 .export QueueAttrRow, SyncHeroPixels
 .import SetMessage, OpenBox, CloseBox, BoxStep, RenderLine
 .import DrawPrompt, ClearPrompt, RowSegs, WriteRowSegs, FillRowSegs
+.import BattleEnter, BattleTick, InitParty, RollEncounter
+.import SetPrgCode
 
 DIR_UP    = 0
 DIR_DOWN  = 1
@@ -40,6 +42,8 @@ GS_TEXT     = 2
 GS_TEXTWAIT = 3
 GS_DIALOG   = 4
 GS_BOXCLOSE = 5
+GS_BATTLE   = 6
+GS_GAMEOVER = 7
 
 TEXT_ROW0   = 21
 TEXT_LINES  = 4
@@ -65,6 +69,10 @@ OB_TRIG  = 8
     lda #0
     sta gamestate
     sta game_flags
+
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    jsr InitParty
 
     lda #0                      ; the overworld
     jsr LoadMap
@@ -99,7 +107,11 @@ OB_TRIG  = 8
 ; --- GS_FIELD: walking -------------------------------------------------------
 .proc StField
     jsr UpdateHero
-    jsr UpdateCamera
+    lda gamestate               ; UpdateHero may have started a battle or a
+    cmp #GS_FIELD               ; warp: the rest of this state must not run
+    beq :+
+    rts
+:   jsr UpdateCamera
     jsr StreamCheck
     jsr BuildOAM
     lda ent_state
@@ -1672,7 +1684,110 @@ OB_TRIG  = 8
     lda tgt_gy
     sta ent_gy
     jsr CheckWarp
+    lda gamestate
+    cmp #GS_FIELD
+    bne @out
+    jsr CheckEncounter
 @out:
+    rts
+.endproc
+
+; One step taken: maybe start a battle.
+.proc CheckEncounter
+    lda enc_rate
+    beq @none
+    lda tgt_gx
+    sta tmpc
+    lda tgt_gy
+    jsr CellAt
+    tax
+    lda tset_prop,x
+    and #$08                    ; PROP_ENCTR
+    beq @none
+    inc step_ctr
+    lda step_ctr
+    cmp #4                      ; never two fights back to back
+    bcc @none
+    jsr Random
+    cmp enc_rate
+    bcs @none
+    lda #0
+    sta step_ctr
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    jsr RollEncounter
+    bcc @none
+    pha
+    lda #GS_BATTLE
+    sta gamestate
+    pla
+    jsr BattleEnter
+@none:
+    rts
+.endproc
+
+; --- GS_BATTLE ---------------------------------------------------------------
+.proc StBattle
+    jsr HideSprites
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    jsr BattleTick
+    lda btl_phase
+    cmp #10                     ; BP_DONE
+    bcc @done
+    lda btl_result
+    cmp #2                      ; party wiped
+    beq @over
+    jsr ReturnToField
+    lda #GS_FIELD
+    sta gamestate
+    rts
+@over:
+    lda #GS_GAMEOVER
+    sta gamestate
+@done:
+    rts
+.endproc
+
+.proc ReturnToField
+    lda map_id
+    jsr LoadMap
+    jsr UpdateCamera
+    jsr DrawFullMap
+    rts
+.endproc
+
+.proc HideSprites
+    ldy #0
+    lda #$FF
+:   sta OAM_BUF,y
+    iny
+    bne :-
+    rts
+.endproc
+
+.proc StGameOver
+    lda pad1_new
+    and #BTN_A|BTN_START
+    beq @done
+    ; revive at the last town with half the credits, FF/DQ style
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    jsr InitParty
+    lda #0
+    jsr LoadMap
+    lda #44
+    sta ent_gx
+    lda #68
+    sta ent_gy
+    lda #ST_IDLE
+    sta ent_state
+    jsr SyncHeroPixels
+    jsr UpdateCamera
+    jsr DrawFullMap
+    lda #GS_FIELD
+    sta gamestate
+@done:
     rts
 .endproc
 
@@ -1805,6 +1920,8 @@ state_tab:
     .addr StTextWait-1
     .addr StDialog-1
     .addr StBoxClose-1
+    .addr StBattle-1
+    .addr StGameOver-1
 
 dir_tile:  .byte HERO_TILE_UP, HERO_TILE_DOWN, HERO_TILE_SIDE, HERO_TILE_SIDE
 dir_attr:  .byte 0, 0, $40, 0

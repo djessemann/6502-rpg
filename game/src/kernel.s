@@ -497,7 +497,11 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     rts
 .endproc
 
+; X and Y are preserved: the RNG is called from inside indexed loops all over
+; the battle code.
 .proc Rand16
+    txa
+    pha
     ldx #8
     lda rng
 @lp:
@@ -508,7 +512,9 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 :   dex
     bne @lp
     sta rng
-    cmp #0
+    pla
+    tax
+    lda rng
     rts
 .endproc
 

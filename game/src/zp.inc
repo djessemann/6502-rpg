@@ -202,3 +202,5 @@ box_ctx       = $C5
 box_done      = $C6
 box_row_i     = $C7     ; window job: current screen row (tmpd is not safe:
 box_cnt       = $C8     ; BuildRowStrip and AttrRowCore both use tmpd)
+list_kind     = $C9     ; which battle list the UI is showing
+ui_pending    = $CA     ; bitmask of window interior lines needing a redraw

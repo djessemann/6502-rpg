@@ -160,7 +160,24 @@ btl_slot_y     = $6CBC
 btl_result     = $6CC0
 btl_boss       = $6CC1
 btl_round      = $6CC2
-btl_scratch    = $6CC3      ; ...through $6CFF
+btl_scratch    = $6CC3
+act_cmd        = $6CC4      ; 4: queued command per party member
+act_tgt        = $6CC8      ; 4: its target combatant
+act_arg        = $6CCC      ; 4: tech / item id
+ord_i          = $6CD0      ; index into the initiative order
+n_comb         = $6CD1      ; number of combatants (4 + enemies)
+msg_timer      = $6CD2
+btl_form       = $6CD3      ; formation id
+btl_win        = $6CD4      ; 2: accumulated xp
+btl_cred       = $6CD6      ; 2: accumulated credits
+mon_rec        = $6CD8      ; 16: the monster record being read
+mon_rec2       = $6CE8      ; 16: second type
+sel_i          = $6CF8
+sel_max        = $6CF9
+sel_top        = $6CFA
+lvl_i          = $6CFB
+tmp_wide       = $6CFC
+tech_rec       = $6D70      ; 6: the tech record being applied
 
 ; Shop / menu scratch
 shop_list      = $6D00      ; 16 item ids

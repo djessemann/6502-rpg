@@ -5,17 +5,22 @@ CFG     := nes.cfg
 SRCDIR  := src
 GENDIR  := $(SRCDIR)/gen
 
+SOUND   ?= $(SRCDIR)/sound.s
+
 SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/kernel.s \
-           $(SRCDIR)/sound.s \
+           $(SOUND) \
            $(SRCDIR)/field.s \
            $(SRCDIR)/text.s \
+           $(SRCDIR)/battle.s \
            $(GENDIR)/chr.s \
            $(GENDIR)/tables.s \
            $(GENDIR)/tilesets.s \
            $(GENDIR)/maps_world.s \
            $(GENDIR)/maps_area.s \
-           $(GENDIR)/text.s
+           $(GENDIR)/text.s \
+           $(GENDIR)/data.s \
+           $(GENDIR)/music.s
 
 OBJS    := $(SRCS:.s=.o)
 

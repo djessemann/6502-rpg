@@ -193,4 +193,24 @@ map_ptr_lo     = $6D68      ; current map header pointer (work copy)
 map_ptr_hi     = $6D69
 snd_state      = $6E00      ; ...through $6EFF
 
-; $6F00-$7FFF spare
+; Full-screen menu UI (src/uikit.inc, banks 26 and 29). Fixed addresses, not a
+; BSS segment: the linker's BSS would land on top of the map above.
+ui_row         = $6F20      ; the screen row the pacer / DrawPage is drawing
+ui_cnt         = $6F21
+ui_rem         = $6F22      ; Div24By10's remainder
+ui_note        = $6F23      ; notice string id under the page (0 = none)
+ui_dirty       = $6F24      ; 4: bitmap of screen rows waiting to be redrawn
+ui_n24         = $6F28      ; 3: the number PutNumR is formatting
+ui_sp          = $6F2B      ; page stack depth
+ui_item        = $6F2C      ; the item the menu is about to use / buy / sell
+ui_islot       = $6F2D      ; the inventory slot it came from
+ui_tech        = $6F2E      ; the tech the menu is about to cast
+ui_shop        = $6F2F      ; shop id
+ui_rec         = $6F30      ; 8: the item record being read
+ui_trec        = $6F38      ; 6: the tech record being read
+ui_stkc        = $6F40      ; 6: saved cursor per page-stack level
+ui_stkt        = $6F48      ; 6: saved scroll position
+ui_list        = $6F50      ; 32: the ids on show
+ui_lidx        = $6F70      ; 32: where each came from (inventory slot)
+
+; $6FA0-$7FFF spare

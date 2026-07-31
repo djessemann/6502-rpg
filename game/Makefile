@@ -13,6 +13,8 @@ SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/field.s \
            $(SRCDIR)/text.s \
            $(SRCDIR)/battle.s \
+           $(SRCDIR)/menu.s \
+           $(SRCDIR)/shop.s \
            $(GENDIR)/chr.s \
            $(GENDIR)/tables.s \
            $(GENDIR)/tilesets.s \

@@ -213,3 +213,29 @@ pend_flag     = $D0     ; the story flag that boss's victory sets ($FF none)
 msg_chain     = $D1     ; extra consecutive message ids to show after this one
 chain_n       = $D2     ; ShowMessageChain's count (tmpa is SetMessage scratch)
 atr_col       = $D3     ; AttrColUpdate's attribute column (CellAt eats tmpa)
+
+; --- cross-bank calls (kernel, FarCallRet) -----------------------------------
+far_bank      = $E4     ; the bank the target routine lives in
+far_ret       = $E5     ; the caller's bank, put back when the target returns
+
+; --- full-screen menu UI (src/uikit.inc; banks 26 and 29) --------------------
+; Only the menu/shop banks touch these, and they never run while the field or
+; battle does. ui_a..ui_col are scratch for the page composers, which must not
+; use tmpa-tmpd or X across PutString / PutNumR / Mul8.
+ui_page       = $E6     ; page id within the menu (or the shop)
+ui_cur        = $E7     ; cursor: index of the highlighted entry
+ui_top        = $E8     ; first visible entry of a scrolling list
+ui_max        = $E9     ; number of entries on this page
+ui_who        = $EA     ; the party member the page is acting on
+ui_slot       = $EB     ; equipment slot (0 weapon, 1 armour, 2 shield, 3 helm)
+ui_ptr        = $EC     ; 2 - composer dispatch pointer (ptr belongs to strings)
+ui_a          = $EE     ; composer scratch
+ui_b          = $EF
+ui_c          = $F0
+ui_d          = $F1
+ui_e          = $F2
+ui_col        = $F3     ; PutNumR's write column
+ui_mode       = $F4     ; 0 = queue rows through VBUF, 1 = write straight to VRAM
+ui_req        = $F5     ; what the menu wants the field to do on the way out:
+                        ;   0 nothing, 1 warp to the last town, 2 leave a dungeon
+ui_spare      = $F6     ; 2 - unused, reserved for this subsystem

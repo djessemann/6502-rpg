@@ -225,3 +225,5 @@ ti_tmp2       = $DB
 ti_has_save   = $DC     ; a valid save was found in the battery at boot
 ti_sum        = $DD     ; 2 - checksum accumulator
 ti_cnt        = $DF
+ti_flush      = $E0     ; FlushQueue's own counter: the row composers
+                        ; below it all use ti_cnt as scratch

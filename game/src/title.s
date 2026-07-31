@@ -59,6 +59,20 @@ ROW_CONT   = 24
 Q_BASE     = 2          ; ti_rowq[0] is screen row 2
 Q_LEN      = 24
 
+; the muster's window frame
+FRAME_TOP  = 1
+FRAME_BOT  = 22
+FRAME_W    = 30         ; columns 1..30
+
+F_TL = TILE_FRAME + 0
+F_T  = TILE_FRAME + 1
+F_TR = TILE_FRAME + 2
+F_L  = TILE_FRAME + 3
+F_R  = TILE_FRAME + 5
+F_BL = TILE_FRAME + 6
+F_B  = TILE_FRAME + 7
+F_BR = TILE_FRAME + 8
+
 .segment "BANK27"
 
 ; =============================================================================
@@ -324,6 +338,7 @@ Q_LEN      = 24
     lda #%11111111
     ldx #64
     jsr PpuFill
+    jsr DrawFrame
     jsr BlankNt1
     jsr FinishPaint
 
@@ -336,6 +351,80 @@ Q_LEN      = 24
     jsr MarkStats
     lda #ROW_HELP
     jmp MarkRow
+.endproc
+
+; A window frame around the muster, drawn once with rendering off. The row
+; queue keeps the two vertical edges alive: PushRow writes all 32 columns, so
+; ComposeRow puts F_L and F_R back into every line it composes.
+.proc DrawFrame
+    lda #$20                    ; top border: row FRAME_TOP
+    ldx #(FRAME_TOP*32)+1
+    jsr PpuAddr
+    lda #F_TL
+    sta PPUDATA
+    lda #F_T
+    ldx #FRAME_W-2
+    jsr PpuFill
+    lda #F_TR
+    sta PPUDATA
+
+    lda #FRAME_TOP+1
+    sta ti_row
+@side:
+    lda ti_row
+    jsr FrameRowAddr
+    lda #F_L
+    sta PPUDATA
+    lda ti_row                  ; the right edge needs its own address
+    jsr FrameRowAddr
+    lda vb_lo
+    clc
+    adc #FRAME_W-1
+    tax
+    lda vb_hi
+    jsr PpuAddr
+    lda #F_R
+    sta PPUDATA
+    inc ti_row
+    lda ti_row
+    cmp #FRAME_BOT
+    bcc @side
+
+    lda ti_row
+    jsr FrameRowAddr
+    lda #F_BL
+    sta PPUDATA
+    lda #F_B
+    ldx #FRAME_W-2
+    jsr PpuFill
+    lda #F_BR
+    sta PPUDATA
+    rts
+.endproc
+
+; A = screen row -> the PPU address of column 1 on it, in vb_hi/vb_lo, with
+; PPUADDR already pointed there.
+.proc FrameRowAddr
+    pha
+    lsr a
+    lsr a
+    lsr a
+    clc
+    adc #$20
+    sta vb_hi
+    pla
+    and #7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc #1
+    sta vb_lo
+    lda vb_hi
+    ldx vb_lo
+    jmp PpuAddr
 .endproc
 
 ; The second nametable is never scrolled to, but whatever the field left in it
@@ -421,17 +510,20 @@ Q_LEN      = 24
     jmp MarkRow
 .endproc
 
-; The ready panel replaces the class list, so every list row is redrawn.
+; The ready panel replaces the class list, so every list row is redrawn -- and
+; the stat rows too, or they keep previewing whatever the cursor last sat on.
 .proc MarkReady
     lda #ROW_PROMPT
     jsr MarkRow
+    jsr MarkStats
     jmp MarkList
 .endproc
 
-; Redraw at most two marked rows.
+; Redraw at most two marked rows. The counter lives in ti_flush, not ti_cnt:
+; RowSlot and StatField both use ti_cnt, and they run underneath this loop.
 .proc FlushQueue
     lda #2
-    sta ti_cnt
+    sta ti_flush
 @lp:
     ldx #0
 @scan:
@@ -451,7 +543,7 @@ Q_LEN      = 24
     jsr ComposeRow
     lda ti_row
     jsr PushRow
-    dec ti_cnt
+    dec ti_flush
     bne @lp
     rts
 .endproc
@@ -505,7 +597,15 @@ Q_LEN      = 24
 .proc ComposeRow
     jsr ClearLine
     lda ti_state
-    bne @game
+    bne @framed
+    jmp @menu
+@framed:
+    lda #F_L                    ; keep the muster's frame edges alive
+    sta linebuf+1
+    lda #F_R
+    sta linebuf+30
+    jmp @game
+@menu:
     ; --- the title menu ---
     lda ti_row
     cmp #ROW_NEW

@@ -161,6 +161,14 @@ NOT_KEYON   = %11111110
 .ifdef SOUND_SELFTEST
     jsr SelfTest
 .endif
+.ifdef SOUND_SELFTEST_DEAD
+    ; Negative control: swallow every request so the driver is genuinely never
+    ; given a song, no matter who asks (the engine now requests the map's music
+    ; on every load, so suppressing only the self-test's poke is not enough).
+    lda #0
+    sta music_req
+    sta sfx_req
+.endif
     lda music_req
     beq @nomus
     ldy #0
@@ -176,6 +184,12 @@ NOT_KEYON   = %11111110
     lda snd_song
     bmi @nosong
 
+    ; The two halves of the tick never run on the same frame. Parsing a row for
+    ; four channels and then re-keying all four is by far the most expensive
+    ; thing this driver does, and it would land on one frame every time a bar
+    ; starts; splitting it halves the worst case. The cost is that a new note
+    ; reaches the APU one frame (16ms) late — the same frame late on every
+    ; channel, so nothing flams and nothing drifts.
     dec snd_rowt
     bne @nofetch
     lda snd_tempo
@@ -188,6 +202,7 @@ NOT_KEYON   = %11111110
     jsr RowAdvance
     ldx #12
     jsr RowAdvance
+    jmp @nosong
 @nofetch:
     ldx #0
     jsr ChanFrame
@@ -757,12 +772,40 @@ vib_tab:
 ; -----------------------------------------------------------------------------
 .ifdef SOUND_SELFTEST
 .include "gen/songids.inc"
+snd_live = snd_state+$F2        ; frames this window in which something sounded
+snd_sfxi = snd_state+$F3        ; round-robin sfx id
+
 .proc SelfTest
-    inc snd_stc
+    ; --- liveness, asserted from inside the ROM ------------------------------
+    ; Count the frames where at least one channel has a note sounding. If a
+    ; whole 256-frame window goes by with the driver mostly silent, blank the
+    ; screen: the headless test cannot hear the APU, but it can see that.
+    lda ch_note+0
+    ora ch_note+4
+    ora ch_note+8
+    ora ch_note+12
+    beq :++
+    lda snd_live
+    cmp #$FF
+    beq :+
+    inc snd_live
+:
+:   inc snd_stc
     bne :+
     inc snd_stc+1
 :   lda snd_stc
     bne @sfx
+    lda snd_stc+1
+    cmp #2                  ; the first window is before any music started
+    bcc @newsong
+    lda snd_live
+    cmp #128
+    bcs :+
+    lda #0
+    sta ppu_mask            ; FAIL: the next NMI turns rendering off
+:   lda #0
+    sta snd_live
+@newsong:
     lda snd_stc+1           ; a new song every 256 frames
     and #$07
     tay
@@ -770,25 +813,23 @@ vib_tab:
     cpy #(N_SONGS+1)
     bcc :+
     ldy #1
-:   sty music_req
-    rts
+:
+.ifndef SOUND_SELFTEST_DEAD
+    sty music_req
+.endif                      ; ...with -D SOUND_SELFTEST_DEAD the driver is never
+    rts                     ; asked to play: the liveness check above must then
+                            ; black the screen. t_sound.py builds that ROM too,
+                            ; so a passing test cannot be a false positive.
 @sfx:
-    and #$3F                ; an sfx every 64 frames
+    and #$3F                ; the next sfx every 64 frames, round-robin
     bne @rts
-    lda snd_stc
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    and #$03
-    tay
-    iny
-    cpy #(N_SFX+1)
+    inc snd_sfxi
+    lda snd_sfxi
+    cmp #(N_SFX+1)
     bcc :+
-    ldy #1
-:   sty sfx_req
+    lda #1
+    sta snd_sfxi
+:   sta sfx_req
 @rts:
     rts
 .endproc

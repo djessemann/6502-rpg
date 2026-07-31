@@ -373,6 +373,7 @@ OB_TRIG  = 8
     iny
     lda (mt_ptr),y
     sta map_music
+    sta music_req               ; the driver picks this up on the next tick
     iny
     lda (mt_ptr),y
     sta enc_tab

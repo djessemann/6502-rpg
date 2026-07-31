@@ -210,7 +210,7 @@ def overworld_map(ts):
     m.objects = []
     m.grid = [[ts.id(t) for t in row] for row in grid]
     m.w, m.h = W, H
-    m.music = 2
+    m.music = 3         # SONG_OVERWORLD
     m.enc_zone = 0
     m.enc_rate = 10
     m.flags = 0

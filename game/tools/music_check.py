@@ -28,6 +28,8 @@ sys.path.insert(0, str(HERE))
 import music                                                   # noqa: E402
 import songs                                                   # noqa: E402
 
+ROOT = HERE.parent
+SOUND_BANK = 24
 MIN_SECONDS = 10.0
 SHORT_OK = {"VICTORY", "FANFARE"}
 TIMER_MIN, TIMER_MAX = 8, 2047
@@ -197,10 +199,8 @@ class Sim:
         steady = True
         ev = d["env_data"][c.env]
         if ev & 0x80:
-            vol = ev & 0x0F
             cost += CYC["cf_env_sus"]
         else:
-            vol = ev
             c.env += 1
             steady = False
             cost += CYC["cf_env_move"]
@@ -265,6 +265,8 @@ class Sim:
         cost = CYC["tick_base"]
         self.rowt -= 1
         if self.rowt == 0:
+            # a row frame parses only; the channel updates land on the next
+            # frame (see the comment in SoundTick)
             self.rowt = self.tempo
             cost += CYC["row_yes"]
             for c in self.chans:
@@ -272,8 +274,8 @@ class Sim:
             self.row += 1
         else:
             cost += CYC["row_no"]
-        for c in self.chans:
-            cost += CYC["call"] + self.chan_frame(c)
+            for c in self.chans:
+                cost += CYC["call"] + self.chan_frame(c)
         self.frames += 1
         self.cycles.append(cost)
         if not any(c.active for c in self.chans):
@@ -293,8 +295,10 @@ VIB_TAB = [_signed(b) for b in bytes([
     0, 5, 10, 15, 15, 15, 10, 5, 0, 0xFB, 0xF6, 0xF1, 0xF1, 0xF1, 0xF6, 0xFB])]
 
 
-def note_name(idx):
-    midi = music.BASE_MIDI + idx
+def note_name(idx, ch=0):
+    # triangle notes are stored +12 (the triangle sounds an octave below a pulse
+    # for the same timer), so report what is actually heard.
+    midi = music.BASE_MIDI + idx - (music.TRI_SHIFT if ch == 2 else 0)
     names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
     return f"{names[midi % 12]}{midi // 12 - 1}"
 
@@ -323,6 +327,68 @@ def check_patterns(d):
     return bad
 
 
+def check_rom(d):
+    """End-to-end: decode the assembled ROM and compare it to the compiler.
+
+    music_check's simulation runs on the compiler's own structures; this reads
+    the bytes that actually shipped in PRG bank 24 and walks every song header,
+    order row and pattern from there, so a mistake in the ca65 emitter cannot
+    slip through. Skipped if the ROM has not been built yet.
+    """
+    rom = ROOT / "threnos.nes"
+    dbg = ROOT / "threnos.dbg"
+    if not (rom.exists() and dbg.exists()):
+        print("\n(threnos.nes not built - skipping the ROM cross-check)")
+        return []
+    syms = {}
+    for line in dbg.read_text().splitlines():
+        if line.startswith("sym\t") and "val=0x" in line:
+            f = dict(kv.split("=", 1) for kv in line[4:].split(",") if "=" in kv)
+            if f.get("type") == "lab":
+                syms.setdefault(f["name"].strip('"'), int(f["val"], 16))
+    if "song_tab" not in syms:
+        print("\n(no song_tab in threnos.dbg - skipping the ROM cross-check)")
+        return []
+    bank = (rom.read_bytes())[16 + SOUND_BANK * 8192:16 + (SOUND_BANK + 1) * 8192]
+
+    def at(addr):                      # bank 24 is linked at $A000
+        return addr - 0xA000
+
+    def word(addr):
+        return bank[at(addr)] | (bank[at(addr) + 1] << 8)
+
+    bad = []
+    for s in d["songs"]:
+        h = word(syms["song_tab"] + 2 * s["id"])
+        if (bank[at(h)], bank[at(h) + 1], bank[at(h) + 2]) != (
+                s["tempo"], s["n_order"], s["loop_n"]):
+            bad.append(f"ROM song {s['name']}: header mismatch")
+            continue
+        if s["loop_n"] and word(h + 3) != h + 5 + 8 * s["loop_idx"]:
+            bad.append(f"ROM song {s['name']}: loop pointer mismatch")
+        for i, row in enumerate(s["order"]):
+            for ch in range(4):
+                a = word(h + 5 + 8 * i + 2 * ch)
+                want = d["patterns"][row[ch]]
+                got = bytes(bank[at(a):at(a) + len(want)])
+                if got != want:
+                    bad.append(f"ROM song {s['name']} order {i} ch {ch}: "
+                               f"pattern bytes differ at ${a:04X}")
+    for s in d["sfx"]:
+        a = word(syms["sfx_tab"] + 2 * s["id"])
+        if bytes(bank[at(a):at(a) + len(s["data"])]) != s["data"]:
+            bad.append(f"ROM sfx {s['name']}: bytes differ at ${a:04X}")
+    used = len(bank.rstrip(b"\xff"))
+    if bad:
+        print(f"\nROM cross-check: {len(bad)} mismatches against the compiler")
+    else:
+        print(f"\nROM cross-check: every song header, order row, pattern and "
+              f"sfx in PRG bank {SOUND_BANK}\n  matches the compiler. "
+              f"Bank {SOUND_BANK} holds {used} of 8192 bytes "
+              f"({8192 - used} free).")
+    return bad
+
+
 def main():
     d = music.compile_all(songs.SONGS, songs.INSTRUMENTS,
                           songs.ENVELOPES, songs.SFX)
@@ -335,6 +401,7 @@ def main():
 
     worst_frame = 0
     worst_song = ""
+    all_cycles = []
     chan_names = ("P1", "P2", "TRI", "NOI")
 
     for s in d["songs"]:
@@ -347,6 +414,7 @@ def main():
         loop_secs = s["loop_idx"] * music.PAT_ROWS * s["tempo"] / 60.0
         mx = max(sim.cycles)
         avg = sum(sim.cycles) / len(sim.cycles)
+        all_cycles += sim.cycles
         if mx > worst_frame:
             worst_frame, worst_song = mx, s["name"]
 
@@ -376,10 +444,9 @@ def main():
                 continue
             tmin = min(sim.timers[ci])
             tmax = max(sim.timers[ci])
-            octave = " (an octave down on the triangle)" if ci == 2 else ""
             print(f"  {chan_names[ci]:3s}: {len(notes):4d} notes, "
-                  f"{note_name(lo)}..{note_name(hi)}, "
-                  f"timers {tmin}..{tmax}{octave}")
+                  f"{note_name(lo, ci)}..{note_name(hi, ci)}, "
+                  f"timers {tmin}..{tmax}")
             if not (TIMER_MIN <= tmin and tmax <= TIMER_MAX):
                 fail.append(f"{s['name']} {chan_names[ci]}: timer "
                             f"{tmin}..{tmax} outside {TIMER_MIN}..{TIMER_MAX}")
@@ -403,10 +470,19 @@ def main():
                 if not TIMER_MIN <= t <= TIMER_MAX:
                     fail.append(f"sfx {s['name']} step {i}: timer {t}")
 
+    fail += check_rom(d)
+
     sz = d["sizes"]
     print("\nbytes: " + ", ".join(f"{k} {v}" for k, v in sz.items()))
-    print(f"worst frame over all songs: {worst_frame} cycles ({worst_song}), "
-          f"{worst_frame / 29780 * 100:.1f}% of an NTSC frame")
+    allc = sorted(all_cycles)
+    n = len(allc)
+    over = sum(1 for c in allc if c > 1000)
+    print(f"cycles per NMI over {n} simulated frames: "
+          f"mean {sum(allc) / n:.0f}, median {allc[n // 2]}, "
+          f"p95 {allc[int(n * 0.95)]}, p99 {allc[int(n * 0.99)]}, "
+          f"max {worst_frame} ({worst_song})")
+    print(f"  frames over 1000 cycles: {over} ({over / n * 100:.2f}%); "
+          f"the max is {worst_frame / 29780 * 100:.1f}% of an NTSC frame")
 
     if fail:
         print("\nFAILED:")

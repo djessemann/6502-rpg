@@ -37,8 +37,8 @@ DUN_LEGEND = {
 }
 
 # Music track ids (see design/BIBLE.md section 10).
-MUS_TOWN = 1
-MUS_DUNGEON = 3
+MUS_TOWN = 2        # SONG_TOWN
+MUS_DUNGEON = 4     # SONG_DUNGEON
 
 # Encounter table ids. 0-8 belong to the overworld (world.OW_ZONES).
 ENC = {"CINDER": 9, "TIDE": 10, "STORM": 11, "HOLLOW": 12, "CAUSEWAY": 13,

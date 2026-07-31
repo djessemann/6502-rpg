@@ -14,6 +14,7 @@
 .include "gen/charmap.inc"
 .include "gen/msgids.inc"
 .include "gen/dataids.inc"
+.include "gen/songids.inc"
 
 .import SetPrgData, SetChrBank, PpuAddr, PpuFill, LoadPalette, Random
 .import Div8, Div16, Mul8, VBufAlloc, ScreenOff, ScreenOn
@@ -67,6 +68,15 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
     sta btl_cred+1
 
     jsr LoadFormation
+    lda #SFX_ENCOUNTER
+    sta sfx_req
+    lda btl_boss
+    and #1
+    beq :+
+    lda #SONG_BOSS
+    jmp :++
+:   lda #SONG_BATTLE
+:   sta music_req
     jsr SetupCombatants
     jsr DrawBattleScreen
     lda #BP_INTRO
@@ -1134,9 +1144,13 @@ BOX_ROW = 20
     bne @choose
     rts
 @redraw:
+    lda #SFX_CURSOR
+    sta sfx_req
     jsr DrawCmdCursor
     rts
 @choose:
+    lda #SFX_CONFIRM
+    sta sfx_req
     ldx btl_actor
     lda menu_cursor
     sta act_cmd,x
@@ -1881,11 +1895,15 @@ BOX_ROW = 20
     bne :+
     lda #1
     sta dmg_lo
-:   jsr Random
+:   lda #SFX_HIT
+    sta sfx_req
+    jsr Random
     and #31
     bne @nocrit
     asl dmg_lo
     rol dmg_hi
+    lda #SFX_CRIT
+    sta sfx_req
 @nocrit:
     ldy btl_target
     lda b_guard,y
@@ -2388,6 +2406,8 @@ BOX_ROW = 20
 @done:
     lda #3
     sta btl_result
+    lda #SONG_VICTORY
+    sta music_req
     lda #BP_VICTORY
     sta btl_phase
     jsr WriteBackHp

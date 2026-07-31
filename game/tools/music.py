@@ -261,6 +261,9 @@ def compile_all(songs, instruments, envelopes, sfxs):
         if nbars * BAR_ROWS % PAT_ROWS:
             raise ValueError(f"{song['name']}: {nbars} bars is not a whole "
                              f"number of {PAT_ROWS}-row patterns")
+        if not 2 <= song["tempo"] <= 255:
+            # tempo 1 would leave no frame for the driver's channel-update pass
+            raise ValueError(f"{song['name']}: tempo must be 2..255")
         total_rows = nbars * BAR_ROWS
         order = []
         ranges = []

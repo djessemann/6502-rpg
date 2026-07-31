@@ -26,7 +26,7 @@ TS_DUNGEON = 2
 
 ; ---- LANDFALL: 32x24, 11 objects ----
 map_LANDFALL:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_LANDFALL_rows
     .addr map_LANDFALL_objs
@@ -95,7 +95,7 @@ map_LANDFALL_objs:
 
 ; ---- EMBERREST: 32x24, 11 objects ----
 map_EMBERREST:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_EMBERREST_rows
     .addr map_EMBERREST_objs
@@ -164,7 +164,7 @@ map_EMBERREST_objs:
 
 ; ---- KELPHOLD: 32x24, 11 objects ----
 map_KELPHOLD:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_KELPHOLD_rows
     .addr map_KELPHOLD_objs
@@ -233,7 +233,7 @@ map_KELPHOLD_objs:
 
 ; ---- HIGHMESA: 32x24, 11 objects ----
 map_HIGHMESA:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_HIGHMESA_rows
     .addr map_HIGHMESA_objs
@@ -302,7 +302,7 @@ map_HIGHMESA_objs:
 
 ; ---- DUSTGATE: 32x24, 11 objects ----
 map_DUSTGATE:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_DUSTGATE_rows
     .addr map_DUSTGATE_objs
@@ -371,7 +371,7 @@ map_DUSTGATE_objs:
 
 ; ---- LASTPORT: 32x24, 11 objects ----
 map_LASTPORT:
-    .byte 32, 24, TS_TOWN, 1
+    .byte 32, 24, TS_TOWN, 2
     .byte 255, 0, 3, 11
     .addr map_LASTPORT_rows
     .addr map_LASTPORT_objs
@@ -440,7 +440,7 @@ map_LASTPORT_objs:
 
 ; ---- CINDER1: 40x32, 8 objects ----
 map_CINDER1:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 9, 14, 3, 8
     .addr map_CINDER1_rows
     .addr map_CINDER1_objs
@@ -522,7 +522,7 @@ map_CINDER1_objs:
 
 ; ---- CINDER2: 40x32, 7 objects ----
 map_CINDER2:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 9, 14, 1, 7
     .addr map_CINDER2_rows
     .addr map_CINDER2_objs
@@ -603,7 +603,7 @@ map_CINDER2_objs:
 
 ; ---- CINDER3: 40x32, 6 objects ----
 map_CINDER3:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 9, 14, 1, 6
     .addr map_CINDER3_rows
     .addr map_CINDER3_objs
@@ -683,7 +683,7 @@ map_CINDER3_objs:
 
 ; ---- TIDE1: 40x32, 8 objects ----
 map_TIDE1:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 10, 14, 3, 8
     .addr map_TIDE1_rows
     .addr map_TIDE1_objs
@@ -765,7 +765,7 @@ map_TIDE1_objs:
 
 ; ---- TIDE2: 40x32, 7 objects ----
 map_TIDE2:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 10, 14, 1, 7
     .addr map_TIDE2_rows
     .addr map_TIDE2_objs
@@ -846,7 +846,7 @@ map_TIDE2_objs:
 
 ; ---- TIDE3: 40x32, 6 objects ----
 map_TIDE3:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 10, 14, 1, 6
     .addr map_TIDE3_rows
     .addr map_TIDE3_objs
@@ -926,7 +926,7 @@ map_TIDE3_objs:
 
 ; ---- STORM1: 40x32, 8 objects ----
 map_STORM1:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 11, 14, 3, 8
     .addr map_STORM1_rows
     .addr map_STORM1_objs
@@ -1008,7 +1008,7 @@ map_STORM1_objs:
 
 ; ---- STORM2: 40x32, 7 objects ----
 map_STORM2:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 11, 14, 1, 7
     .addr map_STORM2_rows
     .addr map_STORM2_objs
@@ -1089,7 +1089,7 @@ map_STORM2_objs:
 
 ; ---- STORM3: 40x32, 6 objects ----
 map_STORM3:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 11, 14, 1, 6
     .addr map_STORM3_rows
     .addr map_STORM3_objs
@@ -1169,7 +1169,7 @@ map_STORM3_objs:
 
 ; ---- HOLLOW1: 40x32, 8 objects ----
 map_HOLLOW1:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 12, 14, 3, 8
     .addr map_HOLLOW1_rows
     .addr map_HOLLOW1_objs
@@ -1251,7 +1251,7 @@ map_HOLLOW1_objs:
 
 ; ---- HOLLOW2: 40x32, 7 objects ----
 map_HOLLOW2:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 12, 14, 1, 7
     .addr map_HOLLOW2_rows
     .addr map_HOLLOW2_objs
@@ -1332,7 +1332,7 @@ map_HOLLOW2_objs:
 
 ; ---- HOLLOW3: 40x32, 6 objects ----
 map_HOLLOW3:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 12, 14, 1, 6
     .addr map_HOLLOW3_rows
     .addr map_HOLLOW3_objs
@@ -1423,7 +1423,7 @@ map_HOLLOW3_objs:
 
 ; ---- CAUSEWAY: 48x24, 8 objects ----
 map_CAUSEWAY:
-    .byte 48, 24, TS_DUNGEON, 3
+    .byte 48, 24, TS_DUNGEON, 4
     .byte 13, 14, 3, 8
     .addr map_CAUSEWAY_rows
     .addr map_CAUSEWAY_objs
@@ -1489,7 +1489,7 @@ map_CAUSEWAY_objs:
 
 ; ---- RELAY1: 32x24, 7 objects ----
 map_RELAY1:
-    .byte 32, 24, TS_DUNGEON, 3
+    .byte 32, 24, TS_DUNGEON, 4
     .byte 14, 14, 3, 7
     .addr map_RELAY1_rows
     .addr map_RELAY1_objs
@@ -1554,7 +1554,7 @@ map_RELAY1_objs:
 
 ; ---- RELAY2: 32x24, 6 objects ----
 map_RELAY2:
-    .byte 32, 24, TS_DUNGEON, 3
+    .byte 32, 24, TS_DUNGEON, 4
     .byte 14, 14, 1, 6
     .addr map_RELAY2_rows
     .addr map_RELAY2_objs
@@ -1618,7 +1618,7 @@ map_RELAY2_objs:
 
 ; ---- OSSUARY1: 32x24, 7 objects ----
 map_OSSUARY1:
-    .byte 32, 24, TS_DUNGEON, 3
+    .byte 32, 24, TS_DUNGEON, 4
     .byte 15, 18, 1, 7
     .addr map_OSSUARY1_rows
     .addr map_OSSUARY1_objs
@@ -1683,7 +1683,7 @@ map_OSSUARY1_objs:
 
 ; ---- OSSUARY2: 32x24, 6 objects ----
 map_OSSUARY2:
-    .byte 32, 24, TS_DUNGEON, 3
+    .byte 32, 24, TS_DUNGEON, 4
     .byte 15, 20, 1, 6
     .addr map_OSSUARY2_rows
     .addr map_OSSUARY2_objs
@@ -1747,7 +1747,7 @@ map_OSSUARY2_objs:
 
 ; ---- EREBUS1: 40x32, 8 objects ----
 map_EREBUS1:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 16, 14, 3, 8
     .addr map_EREBUS1_rows
     .addr map_EREBUS1_objs
@@ -1829,7 +1829,7 @@ map_EREBUS1_objs:
 
 ; ---- EREBUS2: 40x32, 8 objects ----
 map_EREBUS2:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 16, 14, 1, 8
     .addr map_EREBUS2_rows
     .addr map_EREBUS2_objs
@@ -1911,7 +1911,7 @@ map_EREBUS2_objs:
 
 ; ---- EREBUS3: 40x32, 7 objects ----
 map_EREBUS3:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 16, 14, 1, 7
     .addr map_EREBUS3_rows
     .addr map_EREBUS3_objs
@@ -1992,7 +1992,7 @@ map_EREBUS3_objs:
 
 ; ---- EREBUS4: 40x32, 5 objects ----
 map_EREBUS4:
-    .byte 40, 32, TS_DUNGEON, 3
+    .byte 40, 32, TS_DUNGEON, 4
     .byte 16, 0, 1, 5
     .addr map_EREBUS4_rows
     .addr map_EREBUS4_objs

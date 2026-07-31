@@ -8,7 +8,7 @@ TS_DUNGEON = 2
 
 ; ---- OVERWORLD: 128x128, 14 objects ----
 map_OVERWORLD:
-    .byte 128, 128, TS_OVERWORLD, 2
+    .byte 128, 128, TS_OVERWORLD, 3
     .byte 0, 10, 0, 14
     .addr map_OVERWORLD_rows
     .addr map_OVERWORLD_objs

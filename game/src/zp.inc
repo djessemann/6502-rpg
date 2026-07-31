@@ -204,3 +204,7 @@ box_row_i     = $C7     ; window job: current screen row (tmpd is not safe:
 box_cnt       = $C8     ; BuildRowStrip and AttrRowCore both use tmpd)
 list_kind     = $C9     ; which battle list the UI is showing
 ui_pending    = $CA     ; bitmask of window interior lines needing a redraw
+pend_kind     = $CB     ; a detail line to add under the next message:
+pend_lo       = $CC     ;   0 none, 1 = "<n> CREDITS", 2 = an item name
+pend_hi       = $CD
+pend_item     = $CE

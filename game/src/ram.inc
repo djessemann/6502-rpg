@@ -53,7 +53,8 @@ ent_kind       = $066C      ; 0 = none, 1 = npc(bg), 2 = npc(sprite), 3 = chest
 ent_arg        = $0678      ; message id / chest id
 ent_tile       = $0684      ; base BG metatile or sprite tile
 ent_home       = $0690      ; movement anchor / flags
-; $069C-$07FF spare
+ent_a4         = $069C      ; the object record's 8th byte (chest credits high)
+; $06A8-$07FF spare
 
 ; --- SAVE file ($6000-$67FF). Bytes here are the save format. ----------------
 SAVE_BASE      = $6000

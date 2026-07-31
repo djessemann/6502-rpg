@@ -127,10 +127,7 @@ The shop, inn and save objects already exist on all six town maps
 fall through to "nothing happens". `battle.s` has working list-selection code
 to copy (`BuildTechList`, `StartItemSel`, and the `UiFlush` pacer).
 
-**3. Progression.** Chests (`OB_CHEST` carries a flag id, item, count and
-credits; `chest_flags` is a 512-bit array in the save file — the area maps
-currently give credits only because they were authored before the item table
-existed, so give them real item ids). Story flags for the four Anchor Sparks,
+**3. Progression.** Chests are **done** (see below). Story flags for the four Anchor Sparks,
 PASSKEY / SKIFF / LIFT CODE / RIFT KEY gating, and `PROP_WATER` / `PROP_HIGH`
 checks in `TryStep` against the `vehicles` byte.
 
@@ -145,8 +142,31 @@ agents on balance and on the engine's remaining scratch-register discipline.
 
 -----
 
+## Open threads left by the chest work
+
+- **A long scripted walk does not land where the pathfinder says it should.**
+  `test/t_chest.py` verifies the credits chest (14 steps) but the item chest at
+  Cinder 1 (33,5) is reached by a much longer route and the party ends up short
+  of it. Same engine code either way, so suspect either the test's stepping
+  (8 frames held + 2 released is exactly one 16px cell — confirmed for short
+  routes) or a disagreement between `TryStep`'s collision and the tileset
+  `prop` table the BFS reads. The test reports this as `info` rather than
+  asserting it; make it an assertion once it is understood. This is the first
+  thing to look at, because a scripted playthrough (task 10) needs long walks
+  to be reliable.
+- **Cinder 1's south-west wing is a cul-de-sac through the exit.** From the
+  entrance you can reach 371 of 372 walkable cells, but from the chest at
+  (4,24) only 77 — the wing's only link to the rest of the floor is the
+  entrance tile (12,18), which is the warp back to the overworld. Walking back
+  costs a trip out and in. `tools/check_areas.py` does not catch this because
+  it floods *over* warps; teach it to treat warp cells as one-way and re-check
+  all 27 maps.
+
 ## Known rough edges
 
+- Chest loot lives in `CHEST_LOOT` in `tools/areas.py`, keyed by chest flag id
+  (chests are numbered in build order). 24 of the 65 chests carry gear; the
+  rest carry credits.
 - The battle HUD's `PutNumber` output is misplaced on the HP line (cosmetic;
   the numbers themselves are right).
 - Enemy AI only ever attacks — `mon_tab` carries `ai` and `special` fields that

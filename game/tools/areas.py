@@ -17,6 +17,7 @@ and the flood-fill check in tools/check_areas.py enforces reachability), so
 shop/inn objects live on their building's DOOR metatile and a save object on
 the walkable cell in front of its TERMINAL.
 """
+import gamedata
 import script_text
 import world
 from maps import GameMap, MF_DUNGEON, MF_SAVE, OB_NPC, OB_CHEST, OB_WARP, \
@@ -151,8 +152,40 @@ def save(mp, gx, gy, msg):
     mp.obj(OB_SAVE, gx, gy, 0, 0, lo, hi, 0)
 
 
+# Chest loot, keyed by chest flag id (chests are numbered in build order, so
+# the ranges follow the dungeon progression: Cinder 0-9, Tide 10-19,
+# Storm 20-29, Hollow 30-39, Causeway 40-42, Relay 43-46, Ossuary 47-52,
+# Erebus 53-64). A chest not listed here keeps the credits its map gave it.
+CHEST_LOOT = {
+    # Cinder — the first dungeon arms the party
+    1:  ("MEDKIT", 3),      4:  ("MACHETE", 1),     7:  ("PLATE VEST", 1),
+    9:  ("ANTITOX", 3),
+    # Tide
+    11: ("MEDKIT-2", 2),    14: ("RIVET GUN", 1),   17: ("HAND PLATE", 1),
+    19: ("STAFF", 1),
+    # Storm
+    21: ("MEDKIT-2", 3),    24: ("ARC SPIKE", 1),   27: ("CERAMWEAVE", 1),
+    29: ("VISOR RIG", 1),
+    # Hollow
+    31: ("STIMPACK", 2),    34: ("CARBINE", 1),     37: ("BLAST WARD", 1),
+    39: ("EXO FRAME", 1),
+    # side dungeons pay better than the road to them
+    41: ("EXIT CHIP", 2),   44: ("FOCUS ROD", 1),   46: ("TP-CELL", 2),
+    48: ("BREAKER", 1),     50: ("STAR FIST", 1),   52: ("NULL FIELD", 1),
+    # Erebus — the last descent
+    54: ("MEDKIT-3", 3),    57: ("PULSE LANCE", 1), 59: ("VOID MANTLE", 1),
+    61: ("ANCHOR MAIL", 1), 63: ("MONOEDGE", 1),    64: ("ARK CROWN", 1),
+}
+
+_ITEM_ID = {n[0]: i for i, n in enumerate(gamedata.ITEMS)}
+
+
 def chest(mp, gx, gy, item=0, count=1, credits=0):
     global _chest_flag
+    if not item and _chest_flag in CHEST_LOOT:
+        name, count = CHEST_LOOT[_chest_flag]
+        item = _ITEM_ID[name]
+        credits = 0
     mp.obj(OB_CHEST, gx, gy, _chest_flag, item, count,
            credits & 0xFF, credits >> 8)
     _chest_flag += 1

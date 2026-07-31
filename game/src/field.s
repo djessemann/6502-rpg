@@ -8,6 +8,7 @@
 .include "banks.inc"
 .include "gen/charmap.inc"
 .include "gen/msgids.inc"
+.include "gen/dataids.inc"
 
 .import SetPrgData, SetChrBank, PpuAddr, PpuFill, LoadPalette, Random
 .import Div8, VBufAlloc, ScreenOff, ScreenOn, ClearNametables
@@ -21,6 +22,8 @@
 .import SetMessage, OpenBox, CloseBox, BoxStep, RenderLine
 .import DrawPrompt, ClearPrompt, RowSegs, WriteRowSegs, FillRowSegs
 .import BattleEnter, BattleTick, InitParty, RollEncounter
+.import PutNumber, PutString, Mul8
+.import item_names
 .import SetPrgCode
 
 DIR_UP    = 0
@@ -74,12 +77,21 @@ OB_TRIG  = 8
     jsr SetPrgCode
     jsr InitParty
 
+.ifdef TEST_START_DUNGEON
+    lda #TEST_START_DUNGEON     ; test builds boot straight into a dungeon
+    jsr LoadMap
+    lda #12                     ; every area map is entered at (12,18)
+    sta ent_gx
+    lda #18
+    sta ent_gy
+.else
     lda #0                      ; the overworld
     jsr LoadMap
     lda #44                     ; START position (see tools/world.py)
     sta ent_gx
     lda #68
     sta ent_gy
+.endif
     lda #DIR_DOWN
     sta ent_dir
     lda #ST_IDLE
@@ -198,6 +210,10 @@ OB_TRIG  = 8
 ; --- GS_DIALOG: message finished, waiting for A -----------------------------
 .proc StDialog
     jsr BuildOAM
+    lda pend_kind
+    beq @wait
+    jsr DrawPendLine
+@wait:
     lda pad1_new
     and #BTN_A
     beq @done
@@ -209,6 +225,64 @@ OB_TRIG  = 8
 .endproc
 
 ; Blank the four interior lines (they are redrawn line by line).
+; Write "<n> CREDITS" or an item's name on the message's second line, so a
+; chest tells you what you actually got.
+.proc DrawPendLine
+    lda pend_kind
+    sta tmpd
+    lda #0
+    sta pend_kind
+    ldx #0
+    lda #0
+:   sta linebuf,x
+    inx
+    cpx #32
+    bne :-
+    lda #TILE_FRAME+3
+    sta linebuf
+    lda #TILE_FRAME+5
+    sta linebuf+31
+    lda tmpd
+    cmp #2
+    beq @item
+    lda pend_lo
+    sta num_lo
+    lda pend_hi
+    sta num_hi
+    ldx #4
+    jsr PutNumber
+    inx
+    lda #<s_credits
+    sta ptr
+    lda #>s_credits
+    sta ptr+1
+    jsr PutString
+    jmp @put
+@item:
+    lda #BANK_TABLES
+    jsr SetPrgData
+    lda pend_item
+    sta mul_a
+    lda #NAME_LEN
+    sta mul_b
+    jsr Mul8
+    lda mul_res
+    clc
+    adc #<item_names
+    sta ptr
+    lda mul_res+1
+    adc #>item_names
+    sta ptr+1
+    ldx #4
+    jsr PutString
+@put:
+    lda #TEXT_ROW0+1
+    jsr RowSegs
+    jsr WriteRowSegs
+    lda map_bank                ; put the map's bank back under $8000
+    jmp SetPrgData
+.endproc
+
 .proc BlankInterior
     lda #TEXT_ROW0
     sta box_row_i
@@ -250,7 +324,16 @@ OB_TRIG  = 8
 :   inc tgt_gx
 @scan:
     jsr FindObject
+    bcs @found
+    ; nothing in front: a chest may be under our own feet (they sit on
+    ; walkable cells, so the party can be standing on one)
+    lda ent_gx
+    sta tgt_gx
+    lda ent_gy
+    sta tgt_gy
+    jsr FindObject
     bcc @nobody
+@found:
     ldx obj_i
     lda ent_kind,x
     cmp #OB_NPC
@@ -259,12 +342,163 @@ OB_TRIG  = 8
     beq @talk
     cmp #OB_SAVE
     beq @talk
+    cmp #OB_CHEST
+    beq @chest
 @nobody:
     lda #MSG_SYS_NOTHING
     jmp ShowMessage
 @talk:
     lda ent_arg,x
     jmp ShowMessage
+@chest:
+    jmp OpenChest
+.endproc
+
+; =============================================================================
+; Treasure chests
+; =============================================================================
+; X = the chest's entity slot. Object bytes are
+;   a0 = chest flag id, a1 = item id, a2 = count, a3/a4 = credits.
+.proc OpenChest
+    lda #0
+    sta pend_kind
+    lda ent_tile,x              ; flag id
+    sta tmpa
+    jsr ChestFlagSet
+    bcc @fresh
+    lda #MSG_SYS_CHEST_ALREADY
+    jmp ShowMessage
+@fresh:
+    lda tmpa
+    jsr MarkChestTaken
+    ldx obj_i
+    lda ent_dir,x               ; item id
+    beq @credits
+    sta pend_item
+    ldy ent_arg,x               ; count
+    bne :+
+    ldy #1
+:   jsr AddItem
+    bcs @full
+    lda #2
+    sta pend_kind
+    lda #MSG_SYS_GOT_ITEM
+    jmp ShowMessage
+@full:
+    lda #MSG_SYS_CARRY_FULL
+    jmp ShowMessage
+@credits:
+    lda ent_home,x              ; credits low
+    sta pend_lo
+    lda ent_a4,x                ; credits high
+    sta pend_hi
+    jsr AddCredits
+    lda pend_lo
+    ora pend_hi
+    beq @empty
+    lda #1
+    sta pend_kind
+    lda #MSG_SYS_GOT_CREDITS
+    jmp ShowMessage
+@empty:
+    lda #MSG_SYS_CHEST_EMPTY
+    jmp ShowMessage
+.endproc
+
+; A = chest flag id -> carry set if that chest has already been opened.
+.proc ChestFlagSet
+    pha
+    lsr a
+    lsr a
+    lsr a
+    tay                         ; byte index
+    pla
+    and #7
+    tax
+    lda chest_flags,y
+    and bit_tab,x
+    beq @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+; A = chest flag id: record it as opened (the save file remembers).
+.proc MarkChestTaken
+    pha
+    lsr a
+    lsr a
+    lsr a
+    tay
+    pla
+    and #7
+    tax
+    lda chest_flags,y
+    ora bit_tab,x
+    sta chest_flags,y
+    rts
+.endproc
+
+; A = item id, Y = count. Carry set if the inventory is full.
+.proc AddItem
+    sta tmpb
+    sty tmpc
+    ldx #0
+@stack:
+    lda inv_id,x
+    cmp tmpb
+    bne @nextstack
+    lda inv_ct,x
+    clc
+    adc tmpc
+    cmp #100
+    bcs @nextstack              ; would overflow the stack: use a new slot
+    sta inv_ct,x
+    clc
+    rts
+@nextstack:
+    inx
+    cpx #32
+    bcc @stack
+    ldx #0
+@free:
+    lda inv_id,x
+    beq @put
+    inx
+    cpx #32
+    bcc @free
+    sec
+    rts
+@put:
+    lda tmpb
+    sta inv_id,x
+    lda tmpc
+    sta inv_ct,x
+    clc
+    rts
+.endproc
+
+; pend_lo/pend_hi credits into the party's purse (24-bit, saturating).
+.proc AddCredits
+    lda credits
+    clc
+    adc pend_lo
+    sta credits
+    lda credits+1
+    adc pend_hi
+    sta credits+1
+    lda credits+2
+    adc #0
+    sta credits+2
+    bcc @done
+    lda #$FF                    ; saturate rather than wrap
+    sta credits
+    sta credits+1
+    sta credits+2
+@done:
+    rts
 .endproc
 
 ; A = message id: open the window and start the message.
@@ -558,6 +792,9 @@ OB_TRIG  = 8
     iny
     lda (srcp),y                ; a3
     sta ent_home,x
+    iny
+    lda (srcp),y                ; a4
+    sta ent_a4,x
     ; advance
     lda srcp
     clc
@@ -1695,6 +1932,9 @@ OB_TRIG  = 8
 
 ; One step taken: maybe start a battle.
 .proc CheckEncounter
+.ifdef TEST_NO_ENCOUNTERS
+    rts                         ; test builds walk without interruption
+.endif
     lda enc_rate
     beq @none
     lda tgt_gx
@@ -1914,6 +2154,9 @@ HERO_TILE_SIDE = 16
 .endproc
 
 .segment "ENGRO"
+bit_tab:   .byte 1, 2, 4, 8, 16, 32, 64, 128
+s_credits: .byte "CREDITS", STR_END
+
 state_tab:
     .addr StField-1
     .addr StBoxOpen-1

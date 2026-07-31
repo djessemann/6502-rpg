@@ -48,6 +48,7 @@ GS_DIALOG   = 4
 GS_BOXCLOSE = 5
 GS_BATTLE   = 6
 GS_GAMEOVER = 7
+GS_ENDED    = 8
 
 TEXT_ROW0   = 21
 TEXT_LINES  = 4
@@ -115,7 +116,37 @@ OB_TRIG  = 8
     lda #$FF
     sta pend_form
     sta pend_flag
+    lda #0
+    sta msg_chain
+    sta box_ctx
     rts
+.endproc
+
+; The ending: MSG_END_1..7 are consecutive, so one chained message covers it.
+.proc StartEnding
+    lda #SONG_ENDING
+    sta music_req
+    lda #1
+    sta box_ctx
+    ldx #6                      ; MSG_END_1 plus six more
+    lda #MSG_END_1
+    jmp ShowMessageChain
+.endproc
+
+; A = first message id, X = how many consecutive ids follow it.
+; The count needs its own byte: SetMessage uses tmpa as scratch, so stashing it
+; there made the chain length come back as the message id.
+.proc ShowMessageChain
+    stx chain_n
+    jsr ShowMessage
+    lda chain_n
+    sta msg_chain
+    rts
+.endproc
+
+; Nothing follows the ending: hold the last frame.
+.proc StEnded
+    jmp BuildOAM
 .endproc
 
 ; =============================================================================
@@ -171,7 +202,13 @@ OB_TRIG  = 8
     jsr BuildOAM
     lda box_done
     beq @done
-    lda #GS_FIELD
+    lda box_ctx
+    cmp #1                      ; the ending: nothing follows it
+    bne :+
+    lda #GS_ENDED
+    sta gamestate
+    rts
+:   lda #GS_FIELD
     sta gamestate
     lda pend_form               ; a trigger armed a boss: fight it now
     cmp #$FF
@@ -245,6 +282,19 @@ OB_TRIG  = 8
     lda pad1_new
     and #BTN_A
     beq @done
+    lda msg_chain
+    beq @close
+    dec msg_chain               ; more of this scene to read
+    inc msg_id
+    lda msg_id
+    jsr SetMessage
+    lda #0
+    sta cur_line
+    jsr BlankInterior
+    lda #GS_TEXT
+    sta gamestate
+    rts
+@close:
     jsr CloseBox
     lda #GS_BOXCLOSE
     sta gamestate
@@ -680,8 +730,12 @@ OB_TRIG  = 8
     rts
 .endproc
 
-; A = message id: open the window and start the message.
+; A = message id: open the window and start the message. Messages shown this
+; way can be chained (see msg_chain) because the script's ids are consecutive.
 .proc ShowMessage
+    sta msg_id
+    ldx #0
+    stx msg_chain               ; a plain message never inherits a stale chain
     jsr SetMessage
     jsr OpenBox
     lda #GS_BOXOPEN
@@ -2164,14 +2218,25 @@ OB_TRIG  = 8
     cmp #2                      ; party wiped
     beq @over
     cmp #3                      ; victory: an armed boss is now beaten
-    bne :+
+    bne @ret
     lda pend_flag
     cmp #$FF
     beq :+
     jsr MarkStory
     lda #$FF
     sta pend_flag
-:   jsr ReturnToField
+:   lda btl_form
+    cmp #FORM_THE_ARCHON        ; the Archon has a second form
+    bne :+
+    lda #FORM_ARCHON_PRIME
+    jsr BattleEnter             ; straight into it, no return to the field
+    rts
+:   cmp #FORM_ARCHON_PRIME
+    bne @ret
+    jsr ReturnToField
+    jmp StartEnding
+@ret:
+    jsr ReturnToField
     lda #GS_FIELD
     sta gamestate
     rts
@@ -2358,6 +2423,7 @@ state_tab:
     .addr StBoxClose-1
     .addr StBattle-1
     .addr StGameOver-1
+    .addr StEnded-1
 
 dir_tile:  .byte HERO_TILE_UP, HERO_TILE_DOWN, HERO_TILE_SIDE, HERO_TILE_SIDE
 dir_attr:  .byte 0, 0, $40, 0

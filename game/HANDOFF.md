@@ -19,6 +19,7 @@ python3 test/t_sound.py    # driver liveness + negative control
 python3 test/t_chest.py    # opening a chest, and its flag sticking
 python3 test/t_inn.py      # resting, and being refused when broke
 python3 test/t_story.py    # a trigger plays, arms its boss, and never replays
+python3 test/t_ending.py   # THE ARCHON -> ARCHON PRIME -> the ending
 python3 tools/check_areas.py    # every area map: reachability, objects, ids
 python3 tools/music_check.py    # song data vs the bytes in the built ROM
 ```
@@ -135,24 +136,32 @@ to copy (`BuildTechList`, `StartItemSel`, and the `UiFlush` pacer).
 PASSKEY / SKIFF / LIFT CODE / RIFT KEY gating, and `PROP_WATER` / `PROP_HIGH`
 checks in `TryStep` against the `vehicles` byte.
 
-**4. Bosses and the ending.** Triggers now arm bosses and set their story flag
-on victory (`CheckTrigger` in `field.s`, `boss_by_map` generated into the
-engine bank). Remaining:
-  * **ARCHON PRIME.** Beating THE ARCHON on Erebus 4 currently just ends the
-    fight. The second stage needs chaining: on victory over `FORM_THE_ARCHON`,
-    arm `FORM_ARCHON_PRIME` instead of clearing `pend_form`.
-  * **The ending.** Nothing runs after the last boss; `MSG_END_*` is written
-    and unused.
+**4. Bosses and the ending.** **Done end to end**: triggers arm bosses, set
+their story flag on victory, THE ARCHON chains into ARCHON PRIME, and beating
+that plays MSG_END_1..7 and holds in GS_ENDED. The game is completable.
+Remaining polish:
   * **Post-victory scenes.** A trigger shows one message before its fight and
-    nothing after. The Anchor Spark / reward lines in `script_text.py` want a
-    second message id on the object, or a convention like "flag message + 1".
-  * The four Anchor Sparks are only story *flags* today - nothing reads them,
-    so nothing gates on having relit an Anchor.
+    nothing after, so the Anchor Spark / reward lines never appear. Give the
+    object a second message id, or adopt a convention like "message + 1".
+  * The four Anchor Sparks are only story *flags* - nothing reads them, so
+    nothing gates on having relit an Anchor. Gating is what turns the four arcs
+    into an order rather than four independent dungeons.
+  * The ending holds the last frame forever; it should return to the title
+    once there is one.
 
 **5. QA.** A scripted headless playthrough that reaches the ending, plus review
 agents on balance and on the engine's remaining scratch-register discipline.
 
 -----
+
+## Chained messages
+
+`ShowMessageChain(A = first id, X = extra count)` shows consecutive message ids
+as one scene — the script's ids are consecutive, so the ending is one call.
+`ShowMessage` always clears the chain, so a plain message can never inherit a
+stale one. The count lives in `chain_n`, **not** `tmpa`: `SetMessage` uses
+`tmpa` as scratch, and stashing it there made the chain length come back as the
+message id and walk off the end of the table into garbage.
 
 ## How a scene works now
 

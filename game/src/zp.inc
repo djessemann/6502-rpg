@@ -210,3 +210,5 @@ pend_hi       = $CD
 pend_item     = $CE
 pend_form     = $CF     ; a boss to fight once the message window closes ($FF)
 pend_flag     = $D0     ; the story flag that boss's victory sets ($FF none)
+msg_chain     = $D1     ; extra consecutive message ids to show after this one
+chain_n       = $D2     ; ShowMessageChain's count (tmpa is SetMessage scratch)

@@ -264,12 +264,21 @@ MSG_HOLD  = 40              ; frames a battle message stays up on its own
 
 ; Y = combatant index; copy mon_rec into the combatant arrays.
 .proc FillFromRec
+.ifdef TEST_WEAK_ENEMIES
+    lda #1                      ; test hook: every enemy dies in one hit, so a
+    sta b_hp,y                  ; scripted run can reach the late game
+    sta b_hpmax,y
+    lda #0
+    sta b_hp+8,y
+    sta b_hpmax+8,y
+.else
     lda mon_rec+0
     sta b_hp,y
     sta b_hpmax,y
     lda mon_rec+1
     sta b_hp+8,y
     sta b_hpmax+8,y
+.endif
     lda mon_rec+2
     sta b_atk,y
     lda mon_rec+3

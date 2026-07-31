@@ -26,9 +26,12 @@
 ;                       .addr pat_ch0, pat_ch1, pat_ch2, pat_ch3
 ;                    (channel order: pulse1, pulse2, triangle, noise)
 ;
-; PATTERN — a self-contained event stream. Every pattern sets its own
-; instrument and note length before its first note, so patterns are freely
-; shared between songs (the compiler dedups them).
+; PATTERN — a two-byte header and then an event stream. The header makes every
+; pattern self-contained, so patterns are freely shared between songs (the
+; compiler dedups them) without costing two stream events at every boundary.
+;   +0 inst     the instrument this pattern starts on
+;   +1 len      the note length this pattern starts on, in rows
+;   +2..        the event stream:
 ;   $00        END        end of pattern -> pull the next one from the order
 ;   $01..$60   NOTE n     key on, pitch index n (1..96), lasts `len` rows
 ;   $61        REST       key off, lasts `len` rows
@@ -177,23 +180,23 @@ NOT_KEYON   = %11111110
     bne @nofetch
     lda snd_tempo
     sta snd_rowt
-    ldx #12
-@rowl:
+    ldx #0
     jsr RowAdvance
-    dex
-    dex
-    dex
-    dex
-    bpl @rowl
-@nofetch:
+    ldx #4
+    jsr RowAdvance
+    ldx #8
+    jsr RowAdvance
     ldx #12
-@updl:
+    jsr RowAdvance
+@nofetch:
+    ldx #0
     jsr ChanFrame
-    dex
-    dex
-    dex
-    dex
-    bpl @updl
+    ldx #4
+    jsr ChanFrame
+    ldx #8
+    jsr ChanFrame
+    ldx #12
+    jsr ChanFrame
 @nosong:
     jmp SfxFrame
 .endproc
@@ -355,16 +358,14 @@ pat_empty:
     lda (snd_tmp),y
     iny
     sta ch_note,x
-    lda ch_flag,x
-    and #NOT_STEADY
+    lda #FLAG_ACTIVE        ; clears steady, no retrigger
     sta ch_flag,x
     jmp @dur
 
 @rest:
     lda #0
     sta ch_note,x
-    lda ch_flag,x
-    and #NOT_STEADY
+    lda #FLAG_ACTIVE
     sta ch_flag,x
     jmp @dur
 
@@ -376,10 +377,7 @@ pat_empty:
     sta ch_env,x
     lda #0
     sta ch_vibp,x
-    sta ch_arpp,x
-    lda ch_flag,x
-    and #NOT_STEADY
-    ora #FLAG_KEYON
+    lda #(FLAG_ACTIVE|FLAG_KEYON)
     sta ch_flag,x
     ldy snd_bank
 
@@ -427,7 +425,13 @@ pat_empty:
     sta snd_tmp+1
     lda snd_bank
     sta snd_tmp
-    ldy #0
+    ldy #0                  ; the pattern header: starting instrument, length
+    lda (snd_tmp),y
+    sta ch_inst,x
+    iny
+    lda (snd_tmp),y
+    sta ch_len,x
+    iny
     jmp @ev
 
 @stop:

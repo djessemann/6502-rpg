@@ -157,10 +157,15 @@ def slice_patterns(evs, total_rows):
 
 
 def encode_pattern(evs):
-    """Encode one pattern. Self-contained: it sets its own instrument/length."""
-    out = bytearray()
-    cur_len = None
-    cur_inst = None
+    """Encode one pattern: a 2-byte header (instrument, length) then events.
+
+    The header is what makes patterns self-contained — and therefore shareable —
+    without the driver having to parse two control events at every boundary.
+    """
+    inst0 = next((e.inst for e in evs if e.kind in ("note", "slur")), 0)
+    out = bytearray((inst0, evs[0].dur))
+    cur_len = evs[0].dur
+    cur_inst = inst0
     for ev in evs:
         if ev.kind in ("note", "slur") and ev.inst != cur_inst:
             out += bytes((EV_INST, ev.inst))

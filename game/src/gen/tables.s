@@ -35,7 +35,7 @@
 .import map_EREBUS4
 .segment "ENGRO"
 map_bank_tab:
-    .byte 8,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
+    .byte 8,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5
 map_addr_tab:
     .addr map_OVERWORLD
     .addr map_LANDFALL

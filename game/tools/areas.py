@@ -36,22 +36,6 @@ DUN_LEGEND = {
     'D': 'DOOR', '>': 'STAIRD', '<': 'STAIRU', 'H': 'CHEST', 'R': 'RUBBLE',
 }
 
-# Which overworld landmark each map returns to.
-SITE_OF = {
-    "LANDFALL": "LANDFALL", "EMBERREST": "EMBERREST", "KELPHOLD": "KELPHOLD",
-    "HIGHMESA": "HIGHMESA", "DUSTGATE": "DUSTGATE", "LASTPORT": "LASTPORT",
-    "CINDER1": "CINDER", "CINDER2": "CINDER", "CINDER3": "CINDER",
-    "TIDE1": "TIDE", "TIDE2": "TIDE", "TIDE3": "TIDE",
-    "STORM1": "STORM", "STORM2": "STORM", "STORM3": "STORM",
-    "HOLLOW1": "HOLLOW", "HOLLOW2": "HOLLOW", "HOLLOW3": "HOLLOW",
-    "CAUSEWAY": "REEF", "RELAY1": "RELAY", "RELAY2": "RELAY",
-    "OSSUARY1": "OSSUARY", "OSSUARY2": "OSSUARY",
-    "EREBUS1": "RIFT", "EREBUS2": "RIFT", "EREBUS3": "RIFT", "EREBUS4": "RIFT",
-}
-
-TOWN_MAPS = ("LANDFALL", "EMBERREST", "KELPHOLD", "HIGHMESA", "DUSTGATE",
-             "LASTPORT")
-
 # Music track ids (see design/BIBLE.md section 10).
 MUS_TOWN = 1
 MUS_DUNGEON = 3
@@ -191,8 +175,8 @@ def stair(mp, gx, gy, dest, dx, dy):
     mp.obj(OB_WARP, gx, gy, world.MAP_ID[dest], dx, dy, 0, 0)
 
 
-def _town(name, ts, c, site, msg_save):
-    """Wrap a finished town canvas: 32x24, no encounters, save terminal."""
+def _town(name, ts, c):
+    """Wrap a finished town canvas: no encounters, a save terminal on board."""
     return GameMap(name, ts, TOWN_LEGEND, c.rows(), music=MUS_TOWN,
                    enc_zone=0xFF, enc_rate=0, flags=MF_DUNGEON | MF_SAVE)
 
@@ -225,7 +209,7 @@ def landfall(ts):
     c.put(10, 17, 'T')
     c.scatter([(20, 6), (21, 7), (9, 12), (19, 12)], 'X')
 
-    m = _town("LANDFALL", ts, c, "LANDFALL", "MSG_LANDFALL_SAVE")
+    m = _town("LANDFALL", ts, c)
     exit_warp(m, "LANDFALL")
     inn(m, 24, 5, 20, "MSG_LANDFALL_INN")
     shop(m, 5, 11, "MSG_LANDFALL_SHOP")
@@ -271,7 +255,7 @@ def ember_rest(ts):
     c.put(15, 15, 'T')
     c.scatter([(11, 3), (20, 2), (10, 9), (19, 8), (12, 14), (22, 15)], 'X')
 
-    m = _town("EMBERREST", ts, c, "EMBERREST", "MSG_EMBER_SAVE")
+    m = _town("EMBERREST", ts, c)
     exit_warp(m, "EMBERREST")
     inn(m, 5, 4, 18, "MSG_EMBER_INN")
     shop(m, 5, 10, "MSG_EMBER_SHOP")
@@ -310,7 +294,7 @@ def kelphold(ts):
             (30, 13), (6, 21), (17, 21), (25, 20), (2, 19), (29, 19)]
     c.scatter(kelp, 'P')
 
-    m = _town("KELPHOLD", ts, c, "KELPHOLD", "MSG_KELPHOLD_SAVE")
+    m = _town("KELPHOLD", ts, c)
     exit_warp(m, "KELPHOLD")
     inn(m, 5, 4, 24, "MSG_KELPHOLD_INN")
     shop(m, 5, 9, "MSG_KELPHOLD_SHOP")
@@ -343,17 +327,17 @@ def high_mesa(ts):
     building(c, 21, 1, 28, 4, 24, windows=(22, 27))    # grounded plate
     building(c, 3, 6, 8, 8, 5, windows=(7,))
     building(c, 23, 6, 28, 8, 25, windows=(24,))
-    building(c, 3, 12, 9, 15, 6, windows=(4, 8))       # cells, kits and rope
-    building(c, 22, 12, 28, 15, 25, windows=(23, 27))
+    building(c, 2, 13, 7, 16, 5, windows=(3, 6))       # cells, kits and rope
+    building(c, 24, 13, 29, 16, 26, windows=(25, 28))
 
     c.scatter([(11, 12), (13, 12), (15, 12), (17, 12), (19, 12), (21, 12)], 'F')
     c.put(10, 16, 'T')
-    c.scatter([(12, 7), (20, 6), (14, 14), (18, 15), (26, 17), (5, 17)], 'X')
+    c.scatter([(12, 7), (20, 6), (14, 14), (18, 15), (27, 17), (2, 17)], 'X')
 
-    m = _town("HIGHMESA", ts, c, "HIGHMESA", "MSG_MESA_SAVE")
+    m = _town("HIGHMESA", ts, c)
     exit_warp(m, "HIGHMESA")
     inn(m, 6, 4, 30, "MSG_MESA_INN")
-    shop(m, 6, 15, "MSG_MESA_SHOP")
+    shop(m, 5, 16, "MSG_MESA_SHOP")
     shop(m, 24, 4, "MSG_MESA_ARMS")
     save(m, 10, 17, "MSG_MESA_SAVE")
     npc(m, 12, 5, "MSG_MESA_NPC1")
@@ -361,7 +345,7 @@ def high_mesa(ts):
     npc(m, 8, 16, "MSG_MESA_NPC3")
     npc(m, 14, 17, "MSG_MESA_NPC4")
     npc(m, 20, 16, "MSG_MESA_NPC5")
-    npc(m, 26, 16, "MSG_MESA_NPC9")
+    npc(m, 26, 17, "MSG_MESA_NPC9")
     return m
 
 
@@ -392,7 +376,7 @@ def dustgate(ts):
     c.put(15, 14, 'T')
     c.scatter([(4, 3), (27, 4), (14, 8), (23, 9), (26, 13), (5, 14)], 'X')
 
-    m = _town("DUSTGATE", ts, c, "DUSTGATE", "MSG_DUSTGATE_SAVE")
+    m = _town("DUSTGATE", ts, c)
     exit_warp(m, "DUSTGATE")
     inn(m, 9, 7, 35, "MSG_DUSTGATE_INN")
     shop(m, 21, 10, "MSG_DUSTGATE_SHOP")
@@ -431,7 +415,7 @@ def last_port(ts):
     c.scatter([(5, 7), (7, 7), (25, 7), (27, 7), (5, 17), (7, 17),
                (25, 17), (27, 17), (2, 11), (29, 11)], 'X')
 
-    m = _town("LASTPORT", ts, c, "LASTPORT", "MSG_PORT_SAVE")
+    m = _town("LASTPORT", ts, c)
     exit_warp(m, "LASTPORT")
     inn(m, 6, 5, 40, "MSG_PORT_INN")
     shop(m, 19, 5, "MSG_PORT_SHOP")
@@ -646,7 +630,7 @@ def storm1(ts):
         (3, 6, 9, 14),            # generator room
         (3, 20, 8, 27),           # cable vault
         (14, 25, 14, 27),         # vault stair
-        (17, 26, 30, 27),         # south gantry
+        (14, 26, 30, 27),         # south gantry
         (31, 24, 37, 30),         # south-east cell
     ], '.')
     c.put(12, 18, 'D')
@@ -774,3 +758,323 @@ def hollow2(ts):
     chest(m, 20, 4, credits=460)
     chest(m, 9, 28, credits=340)
     return m
+
+
+# --- the Sunken Causeway: one long road under the shelf -----------------------
+def causeway(ts):
+    c = carve(48, 24, [
+        (9, 19, 15, 22),          # the mouth
+        (8, 12, 17, 17),          # west pump hall
+        (18, 14, 27, 15),         # first span
+        (26, 10, 35, 19),         # mid pump hall
+        (36, 14, 43, 15),         # second span
+        (40, 4, 46, 13),          # far hall
+        (4, 12, 8, 13),           # west link
+        (2, 4, 7, 11),            # west cell
+        (22, 10, 22, 13),         # north stair
+        (18, 4, 25, 9),           # north cell
+        (30, 20, 38, 22),         # south cell
+    ], ',')
+    c.put(12, 18, 'D')
+    c.rect(28, 12, 33, 13, 'c')
+    c.rect(3, 6, 6, 9, 'c')
+    c.rect(42, 6, 45, 9, 'c')
+    c.scatter([(28, 16), (31, 16), (34, 16), (10, 14), (15, 14),
+               (20, 5), (23, 8), (33, 21)], 'I')
+    c.scatter([(17, 12), (37, 19)], 'R')
+
+    m = _dmap("CAUSEWAY", ts, c, ENC["CAUSEWAY"], flags=MF_DUNGEON | MF_SAVE)
+    exit_warp(m, "REEF")
+    tx, ty = world.SITES["TIDE"]
+    m.obj(OB_WARP, 44, 6, world.MAP_ID["OVERWORLD"], tx, ty + 1, 1, 0)
+    sign(m, 12, 19, "MSG_STORY_CAUSEWAY_1")
+    trig(m, 30, 14, 1, "MSG_STORY_CAUSEWAY_2")
+    save(m, 13, 20, "MSG_SYS_SAVED")
+    chest(m, 4, 5, credits=160)
+    chest(m, 21, 5, credits=200)
+    chest(m, 36, 21, credits=240)
+    return m
+
+
+# --- Relay Nine: a comms tower with nothing left to talk to -------------------
+def relay1(ts):
+    c = carve(32, 24, [
+        (9, 19, 15, 22),          # the tower porch
+        (8, 12, 17, 17),          # lobby
+        (7, 12, 7, 12),           # west doorway
+        (3, 5, 10, 11),           # transformer room
+        (18, 14, 27, 15),         # spine
+        (21, 5, 29, 13),          # dish room
+    ], '.')
+    c.put(12, 18, 'D')
+    c.rect(3, 5, 10, 5, '=')
+    c.rect(21, 5, 29, 5, '=')
+    c.scatter([(23, 8), (27, 8), (23, 11), (27, 11), (10, 14), (15, 14)], 'I')
+    c.scatter([(9, 17), (19, 15)], 'R')
+    c.put(26, 7, '>')
+
+    m = _dmap("RELAY1", ts, c, ENC["RELAY"], flags=MF_DUNGEON | MF_SAVE)
+    exit_warp(m, "RELAY")
+    sign(m, 12, 19, "MSG_STORY_RELAY_1")
+    trig(m, 12, 17, 1, "MSG_STORY_RELAY_2")
+    save(m, 13, 20, "MSG_SYS_SAVED")
+    chest(m, 5, 7, credits=300)
+    chest(m, 28, 6, credits=450)
+    stair(m, 26, 7, "RELAY2", 5, 17)
+    return m
+
+
+def relay2(ts):
+    c = carve(32, 24, [
+        (2, 14, 9, 21),           # arrival
+        (10, 17, 19, 18),         # approach
+        (14, 6, 27, 16),          # the dish hall
+        (24, 3, 30, 8),           # upper cell
+        (11, 7, 13, 7),           # west doorway
+        (3, 4, 10, 11),           # west cell
+    ], '.')
+    c.rect(19, 10, 22, 13, 'O')                # the array
+    c.scatter([(16, 8), (25, 8), (16, 15), (25, 15), (4, 6), (9, 6)], 'I')
+    c.rect(3, 11, 10, 11, '=')
+    c.put(5, 17, '<')
+
+    m = _dmap("RELAY2", ts, c, ENC["RELAY"])
+    stair(m, 5, 17, "RELAY1", 26, 7)
+    trig(m, 18, 12, 3, "MSG_STORY_RELAY_3")
+    sign(m, 12, 18, "MSG_STORY_RELAY_4")
+    sign(m, 23, 15, "MSG_STORY_RELAY_6")
+    chest(m, 5, 6, credits=500)
+    chest(m, 28, 5, credits=650)
+    return m
+
+
+# --- the Ossuary: two levels of teeth, sorted by size -------------------------
+def ossuary1(ts):
+    c = carve(32, 24, [
+        (9, 19, 15, 22),          # the mouth
+        (7, 13, 17, 18),          # first lobe
+        (18, 15, 25, 16),         # the gullet
+        (20, 6, 29, 14),          # second lobe
+        (2, 6, 10, 12),           # west lobe
+        (3, 16, 6, 21),           # side pocket
+    ], '%')
+    c.put(12, 18, 'D')
+    c.scatter([(4, 8), (8, 8), (4, 11), (22, 8), (26, 8), (22, 12), (26, 12),
+               (9, 15), (14, 15), (5, 19)], 'R')
+    c.put(27, 8, '>')
+
+    m = _dmap("OSSUARY1", ts, c, ENC["OSSUARY"], rate=18)
+    exit_warp(m, "OSSUARY")
+    sign(m, 12, 19, "MSG_STORY_OSSUARY_1")
+    trig(m, 12, 17, 1, "MSG_STORY_OSSUARY_2")
+    chest(m, 4, 20, credits=400)
+    chest(m, 24, 13, credits=520)
+    chest(m, 3, 7, credits=360)
+    stair(m, 27, 8, "OSSUARY2", 5, 17)
+    return m
+
+
+def ossuary2(ts):
+    c = carve(32, 24, [
+        (2, 14, 9, 21),           # arrival
+        (10, 17, 19, 18),         # throat
+        (16, 16, 16, 16),         # the gullet
+        (13, 4, 28, 15),          # the nest
+        (12, 7, 12, 7),           # west gap
+        (3, 4, 11, 10),           # bone pocket
+        (26, 16, 26, 16),         # south gap
+        (22, 17, 29, 22),         # deep pocket
+    ], '%')
+    c.scatter([(15, 6), (19, 6), (23, 6), (15, 13), (19, 13), (23, 13),
+               (5, 6), (9, 8), (24, 19), (28, 19)], 'R')
+    c.put(5, 17, '<')
+
+    m = _dmap("OSSUARY2", ts, c, ENC["OSSUARY"], rate=20)
+    stair(m, 5, 17, "OSSUARY1", 27, 8)
+    trig(m, 21, 10, 4, "MSG_STORY_OSSUARY_3")
+    sign(m, 12, 18, "MSG_SYS_TERMINAL_LOG")
+    chest(m, 5, 5, credits=600)
+    chest(m, 25, 21, credits=800)
+    chest(m, 17, 5, credits=700)
+    return m
+
+
+# --- the Erebus hull: ark corridors nobody in the colony has ever seen --------
+def erebus1(ts):
+    c = carve(40, 32, [
+        (9, 19, 15, 24),          # the airlock
+        (8, 12, 17, 17),          # deck one lobby
+        (18, 15, 34, 16),         # the spine
+        (23, 14, 23, 14),         # bay doors
+        (20, 6, 27, 13),
+        (32, 13, 32, 14),
+        (29, 4, 37, 12),
+        (30, 17, 30, 17),
+        (28, 18, 36, 25),
+        (2, 10, 7, 20),           # port bay
+    ], '.')
+    c.put(12, 18, 'D')
+    c.scatter([(22, 8), (25, 8), (22, 11), (25, 11), (31, 6), (35, 6),
+               (31, 10), (35, 10), (30, 20), (34, 20), (30, 24), (34, 24),
+               (4, 13), (4, 17)], 'I')
+    for a, b in ((18, 22), (24, 29), (34, 34)):
+        c.rect(a, 15, b, 15, '=')
+    c.put(34, 23, '>')
+
+    m = _dmap("EREBUS1", ts, c, ENC["EREBUS"], flags=MF_DUNGEON | MF_SAVE)
+    exit_warp(m, "RIFT")
+    sign(m, 12, 19, "MSG_STORY_RIFT_1")
+    trig(m, 12, 17, 1, "MSG_STORY_HULL_1")
+    save(m, 13, 21, "MSG_SYS_SAVED")
+    chest(m, 4, 12, credits=500)
+    chest(m, 24, 7, credits=560)
+    chest(m, 34, 5, credits=620)
+    stair(m, 34, 23, "EREBUS2", 5, 17)
+    return m
+
+
+def erebus2(ts):
+    c = carve(40, 32, [
+        (2, 14, 9, 21),           # arrival
+        (10, 17, 19, 18),         # approach
+        (20, 17, 36, 18),         # the spine
+        (15, 15, 15, 16),
+        (12, 4, 19, 14),          # cold cells
+        (25, 16, 25, 16),
+        (22, 6, 29, 15),
+        (34, 16, 34, 16),
+        (31, 6, 37, 15),
+        (25, 19, 25, 19),
+        (22, 20, 30, 27),
+        (34, 19, 34, 19),
+        (32, 20, 37, 28),
+    ], '.')
+    c.scatter([(14, 6), (17, 6), (14, 9), (17, 9), (14, 12), (17, 12),
+               (24, 8), (27, 8), (24, 12), (27, 12), (33, 8), (36, 8),
+               (24, 22), (28, 22), (24, 26), (28, 26), (34, 22), (36, 26)], 'I')
+    for a, b in ((20, 24), (26, 33), (35, 36)):
+        c.rect(a, 17, b, 17, '=')
+    c.put(5, 17, '<')
+    c.put(35, 27, '>')
+
+    m = _dmap("EREBUS2", ts, c, ENC["EREBUS"])
+    stair(m, 5, 17, "EREBUS1", 34, 23)
+    stair(m, 35, 27, "EREBUS3", 33, 27)
+    sign(m, 12, 18, "MSG_STORY_HULL_2")
+    trig(m, 15, 5, 5, "MSG_STORY_HULL_3")
+    chest(m, 13, 13, credits=680)
+    chest(m, 26, 7, credits=720)
+    chest(m, 33, 14, credits=760)
+    chest(m, 23, 26, credits=800)
+    return m
+
+
+def erebus3(ts):
+    c = carve(40, 32, [
+        (30, 24, 37, 30),         # arrival
+        (18, 26, 29, 27),         # lower corridor
+        (6, 20, 17, 29),          # the hangar
+        (10, 10, 17, 19),         # the shaft
+        (18, 12, 29, 13),         # upper corridor
+        (30, 6, 37, 16),          # sentinel hall
+        (24, 11, 24, 11),
+        (20, 3, 27, 10),          # magazine
+        (8, 17, 9, 17),
+        (2, 14, 7, 21),           # port bay
+    ], '.')
+    c.scatter([(8, 22), (15, 22), (8, 27), (15, 27), (12, 12), (15, 16),
+               (32, 8), (35, 8), (32, 14), (35, 14), (22, 5), (25, 5),
+               (4, 16), (4, 20)], 'I')
+    c.rect(18, 26, 29, 26, '=')
+    for a, b in ((18, 23), (25, 29)):
+        c.rect(a, 12, b, 12, '=')
+    c.put(33, 27, '<')
+    c.put(34, 10, '>')
+
+    m = _dmap("EREBUS3", ts, c, ENC["EREBUS"])
+    stair(m, 33, 27, "EREBUS2", 35, 27)
+    stair(m, 34, 10, "EREBUS4", 5, 17)
+    sign(m, 12, 20, "MSG_STORY_HULL_4")
+    trig(m, 33, 15, 6, "MSG_BOSS_RIFT_SENTINEL")
+    chest(m, 4, 18, credits=850)
+    chest(m, 23, 4, credits=900)
+    chest(m, 12, 26, credits=950)
+    return m
+
+
+def erebus4(ts):
+    c = carve(40, 32, [
+        (2, 14, 9, 21),           # arrival
+        (10, 17, 19, 18),         # the approach
+        (20, 8, 35, 26),          # the bridge
+    ], '.')
+    c.rect(25, 14, 30, 19, 'O')                # the navigator array
+    c.scatter([(22, 10), (24, 10), (31, 10), (33, 10),
+               (22, 24), (24, 24), (31, 24), (33, 24),
+               (22, 17), (33, 17)], 'I')
+    c.rect(20, 8, 35, 8, '=')
+    c.rect(20, 26, 35, 26, '=')
+    c.put(5, 17, '<')
+
+    m = _dmap("EREBUS4", ts, c, ENC["EREBUS"], rate=0, flags=MF_DUNGEON)
+    stair(m, 5, 17, "EREBUS3", 34, 10)
+    sign(m, 12, 18, "MSG_SYS_TERMINAL_LOG")
+    trig(m, 23, 17, 7, "MSG_STORY_ARCHON_1")
+    chest(m, 21, 12, credits=1000)
+    chest(m, 34, 22, credits=1200)
+    return m
+
+
+# =============================================================================
+def build_all(ts_town, ts_dun):
+    """Return every area map in world.MAP_NAMES[1:] order."""
+    global _chest_flag, _shop_id, _story_flag
+    _chest_flag = _shop_id = _story_flag = 0
+
+    maps = {
+        "LANDFALL": landfall(ts_town),
+        "EMBERREST": ember_rest(ts_town),
+        "KELPHOLD": kelphold(ts_town),
+        "HIGHMESA": high_mesa(ts_town),
+        "DUSTGATE": dustgate(ts_town),
+        "LASTPORT": last_port(ts_town),
+
+        "CINDER1": cinder1(ts_dun),
+        "CINDER2": cinder2(ts_dun),
+        "CINDER3": anchor_core(
+            "CINDER3", ts_dun, ENC["CINDER"], '%', '~', "CINDER2", (33, 27),
+            "MSG_STORY_CINDER_CORE", (300, 260, 420),
+            decor=((7, 26), (16, 8), (37, 9))),
+
+        "TIDE1": tide1(ts_dun),
+        "TIDE2": tide2(ts_dun),
+        "TIDE3": anchor_core(
+            "TIDE3", ts_dun, ENC["TIDE"], ',', 'c', "TIDE2", (29, 29),
+            "MSG_STORY_TIDE_CORE", (360, 320, 480),
+            decor=((6, 28), (17, 5), (35, 10))),
+
+        "STORM1": storm1(ts_dun),
+        "STORM2": storm2(ts_dun),
+        "STORM3": anchor_core(
+            "STORM3", ts_dun, ENC["STORM"], '.', '=', "STORM2", (34, 26),
+            "MSG_STORY_STORM_CORE", (440, 400, 560), mirror=True,
+            decor=((5, 25), (12, 5), (38, 4))),
+
+        "HOLLOW1": hollow1(ts_dun),
+        "HOLLOW2": hollow2(ts_dun),
+        "HOLLOW3": anchor_core(
+            "HOLLOW3", ts_dun, ENC["HOLLOW"], '.', ' ', "HOLLOW2", (34, 10),
+            "MSG_STORY_HOLLOW_CORE", (520, 480, 640), mirror=True,
+            decor=((8, 24), (13, 8), (36, 8))),
+
+        "CAUSEWAY": causeway(ts_dun),
+        "RELAY1": relay1(ts_dun),
+        "RELAY2": relay2(ts_dun),
+        "OSSUARY1": ossuary1(ts_dun),
+        "OSSUARY2": ossuary2(ts_dun),
+        "EREBUS1": erebus1(ts_dun),
+        "EREBUS2": erebus2(ts_dun),
+        "EREBUS3": erebus3(ts_dun),
+        "EREBUS4": erebus4(ts_dun),
+    }
+    return [maps[n] for n in world.MAP_NAMES[1:]]

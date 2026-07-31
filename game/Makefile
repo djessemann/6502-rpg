@@ -8,9 +8,12 @@ GENDIR  := $(SRCDIR)/gen
 SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/kernel.s \
            $(SRCDIR)/sound.s \
-           $(SRCDIR)/step0.s \
+           $(SRCDIR)/field.s \
            $(GENDIR)/chr.s \
-           $(GENDIR)/testbanks.s
+           $(GENDIR)/tables.s \
+           $(GENDIR)/tilesets.s \
+           $(GENDIR)/maps_world.s \
+           $(GENDIR)/maps_area.s
 
 OBJS    := $(SRCS:.s=.o)
 

@@ -33,7 +33,9 @@ enc_tab        = $0584      ; current zone encounter table id
 sfx_req        = $0585
 music_req      = $0586
 box_saved      = $0587
-misc_bss       = $0588      ; ...spare through $05FF
+misc_bss       = $0588      ; ...spare through $059F
+pal_buf        = $05A0      ; 32: assembled palette (16 BG tileset + 16 sprite)
+mcol_buf       = $05C0      ; 16: metatile ids of one column slice
 
 ; Field entities (struct-of-arrays). Index 0 = the party leader.
 MAX_ENT        = 12
@@ -168,6 +170,8 @@ tmp_buf        = $6D20      ; 64 bytes of general scratch
 name_buf       = $6D60      ; 8
 
 ; Sound driver state
+map_ptr_lo     = $6D68      ; current map header pointer (work copy)
+map_ptr_hi     = $6D69
 snd_state      = $6E00      ; ...through $6EFF
 
 ; $6F00-$7FFF spare

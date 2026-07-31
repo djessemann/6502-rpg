@@ -115,7 +115,9 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     bpl :-
 
     ; --- PPU initial state ---------------------------------------------------
-    lda #%10001000          ; NMI on, BG table $0000, sprite table $1000
+    ; NMI stays OFF until ScreenOn turns it on: the shadow must always match
+    ; the register, because ScreenOff decides how to wait on bit 7.
+    lda #%00001000          ; BG table $0000, sprite table $1000, NMI off
     sta ppu_ctrl
     lda #%00011110
     sta ppu_mask
@@ -134,14 +136,8 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     jsr VBufReset
     jsr SoundInit
     jsr GameInit            ; engine bank ($C000, always mapped)
-
-    bit PPUSTATUS
-:   bit PPUSTATUS
-    bpl :-
-    lda ppu_ctrl
-    sta PPUCTRL
-    lda ppu_mask
-    sta PPUMASK
+                            ; (GameInit's DrawFullMap ends in ScreenOn, which
+                            ; is what enables NMI and rendering)
     ; fall through
 .endproc
 
@@ -422,20 +418,41 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     rts
 .endproc
 
-; Turn rendering and NMI off (for full-screen repaints).
+; Turn rendering and NMI off, for a full-screen repaint.
+;
+; NEVER poll PPUSTATUS for vblank while NMI is enabled: the handler reads
+; PPUSTATUS first and clears the flag, so the poll would spin forever. When NMI
+; is on we hand the job to it (it writes ppu_mask every frame) and wait on
+; frame_count instead.
 .proc ScreenOff
-    jsr WaitVBlank
+    lda ppu_ctrl
+    bpl @nmi_off
     lda #0
+    sta ppu_mask            ; NMI turns rendering off at the next vblank
+    jsr WaitFrame
+    lda ppu_ctrl
+    and #%01111111
+    sta ppu_ctrl
+    sta PPUCTRL             ; safe now: rendering is already off
+    rts
+@nmi_off:
+    lda #0
+    sta ppu_mask
     sta PPUMASK
     sta PPUCTRL
     rts
 .endproc
 
-; Turn rendering and NMI back on from the shadows.
+; Turn rendering and NMI back on. Always entered with NMI off, so polling
+; PPUSTATUS here is safe.
 .proc ScreenOn
     jsr WaitVBlank
-    bit PPUSTATUS
+    lda #%00011110
+    sta ppu_mask
     lda ppu_ctrl
+    ora #%10000000
+    sta ppu_ctrl
+    bit PPUSTATUS
     sta PPUCTRL
     lda scroll_x
     sta PPUSCROLL

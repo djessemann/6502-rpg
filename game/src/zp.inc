@@ -165,3 +165,30 @@ row_src       = $9B     ; 2
 dir_tmp       = $9D
 step_tmp      = $9E
 coll_res      = $9F
+
+; --- map / field engine ($A0-$BF) --------------------------------------------
+map_objs      = $A0     ; 2 - pointer to the current map's object list
+map_zones     = $A2     ; 2 - pointer to its 8x8 encounter-zone grid (0 = none)
+map_music     = $A4
+nt_slot       = $A5     ; nametable row slot (WY mod 30)
+wx            = $A6     ; 2 - world tile column being processed
+wy            = $A8     ; 2 - world tile row being processed
+strip_i       = $AA
+mt_id         = $AB
+cam_max_x     = $AC     ; 2 - camera clamp limits for this map
+cam_max_y     = $AE     ; 2
+dir_req       = $B0
+walk_cd       = $B1
+obj_i         = $B2
+obj_ptr       = $B3     ; 2
+tgt_gx        = $B5
+tgt_gy        = $B6
+prop_res      = $B7
+tmpa          = $B8
+tmpb          = $B9
+tmpc          = $BA
+tmpd          = $BB
+atr_row       = $BC
+atr_qy        = $BD
+mcol_mx       = $BE     ; metatile column cached in mcol_buf ($FF = none)
+strm_dir      = $BF

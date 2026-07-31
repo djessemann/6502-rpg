@@ -159,5 +159,33 @@ check(flat(rb.frame) == AMBER,
       f"a corrupted save was accepted (halted on {flat(rb.frame)}, expected "
       f"{AMBER} amber) - the checksum is not being checked")
 
+
+# --- CONTINUE ----------------------------------------------------------------
+# A ROM that boots with a file already in the battery must offer CONTINUE, and
+# choosing it must reach the load entry point rather than the new-game one.
+# The fresh ROM above is the control: it has no file, so its CONTINUE line is
+# blank, and this test checks that too -- otherwise "CONTINUE is on screen"
+# would just be measuring that the title screen has rows.
+PRE = OUT / "title_hassave.nes"
+build(PRE, ["-D", "TEST_PRESTAMP_SAVE=1"])
+rp = Run(rom=PRE)
+rp.idle(40)
+rp.shot("ts_9_continue")
+check(lit(rp.frame, 24, 25) > 60, "a saved file puts CONTINUE on the title",
+      f"CONTINUE is missing with a valid save in the battery "
+      f"(lit={lit(rp.frame,24,25)})")
+rf = Run(rom=ROM)
+rf.idle(40)
+check(lit(rf.frame, 24, 25) < 20,
+      "a fresh battery offers no CONTINUE",
+      f"CONTINUE is offered with no save file (lit={lit(rf.frame,24,25)})")
+
+rp.tap(DOWN, 3, 20)
+rp.tap(A, 3, 60)
+rp.idle(20)
+rp.shot("ts_10_loaded")
+check(flat(rp.frame) == BLUE, "CONTINUE reaches the load entry point",
+      f"CONTINUE halted on {flat(rp.frame)}, expected {BLUE} blue")
+
 print("PASS" if ok else "FAILED")
 sys.exit(0 if ok else 1)

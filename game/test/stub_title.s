@@ -25,6 +25,12 @@
 .ifdef TEST_SAVE_ROUNDTRIP
     jmp SaveRoundTrip
 .endif
+.ifdef TEST_PRESTAMP_SAVE
+    jsr Pattern                 ; boot with a file already in the battery, so
+    lda #TITLE_BANK             ; the title has a CONTINUE to offer
+    jsr SetPrgCode
+    jsr SaveGame
+.endif
 .ifndef TEST_NO_TITLE
     lda #TITLE_BANK
     jsr SetPrgCode

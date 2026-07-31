@@ -43,10 +43,12 @@
 ; sounds an octave below a pulse for the same timer value. On the noise channel
 ; the pitch index is 1..16 = noise period 0..15.
 ;
-; INSTRUMENT (16 max) — four parallel 16-byte tables:
+; INSTRUMENT (16 max) — five parallel 16-byte tables:
 ;   inst_env[i]   start offset into env_data
 ;   inst_duty[i]  pulse duty in bits 6-7 (noise: bit7 = mode flag), else 0
-;   inst_vib[i]   $00 = none; else high nibble = speed, low nibble = depth shift
+;   inst_vib[i]   $00 = no vibrato; else phase increment per frame (1..15)
+;   inst_vibd[i]  which of the four 16-entry vib_tab shapes to use ($00/$10/
+;                 $20/$30) — the depth is baked into the table
 ;   inst_arp[i]   $00 = none; else semitone offsets for arp steps 1 and 2
 ;                 packed as two nibbles (high = step 1, low = step 2)
 ;
@@ -70,7 +72,7 @@
 .export SoundInit, SoundTick, SoundPlay, SoundSfx
 
 .import song_tab, sfx_tab
-.import inst_env, inst_duty, inst_vib, inst_arp
+.import inst_env, inst_duty, inst_vib, inst_vibd, inst_arp
 .import env_data, pitch_lo, pitch_hi
 
 ; -----------------------------------------------------------------------------
@@ -470,8 +472,41 @@ pat_empty:
     and #$0F
     sta snd_vol
 
-    ; --- arpeggio ------------------------------------------------------------
+    ; --- is the pitch going to move this frame? ------------------------------
+    ; If the instrument has neither vibrato nor arpeggio and this is not the
+    ; frame the note started, the timer registers already hold the right value
+    ; and only the volume needs rewriting. That is the common case.
     ldy ch_inst,x
+    lda inst_arp,y
+    ora inst_vib,y
+    bne @modul
+    lda ch_flag,x
+    lsr a                   ; key-on -> carry
+    bcs @modul
+
+    cpx #8
+    beq @tvol
+    bcs @nvol
+    lda inst_duty,y
+    ora #$30
+    ora snd_vol
+    sta $4000,x
+    jmp @finish
+@nvol:
+    lda #$30
+    ora snd_vol
+    sta $4000,x
+    jmp @finish
+@tvol:
+    lda #$80
+    ldy snd_vol
+    beq :+
+    lda #$FF
+:   sta $4000,x
+    jmp @finish
+
+    ; --- arpeggio ------------------------------------------------------------
+@modul:
     lda inst_arp,y
     beq @noarp
     sta snd_t0
@@ -511,36 +546,22 @@ pat_empty:
 
     ; --- vibrato -------------------------------------------------------------
     ldy ch_inst,x
-    lda inst_vib,y
+    lda inst_vib,y          ; phase increment (0 = no vibrato)
     beq @novib
-    sta snd_t0              ; high nibble = speed, low nibble = depth
     lda #0
     sta snd_bank
-    lda snd_t0
-    and #$F0
+    lda inst_vib,y
     clc
     adc ch_vibp,x
     sta ch_vibp,x
     lsr a
     lsr a
     lsr a
-    lsr a
+    lsr a                   ; phase step 0..15
+    ora inst_vibd,y         ; + this instrument's depth table
     tay
-    lda vib_tab,y           ; signed, -3..3
-    sta snd_t1
-    lda snd_t0
-    and #$0F
+    lda vib_tab,y           ; signed delta
     tay
-    lda snd_t1
-    beq @vadd
-    cpy #0
-    beq @vadd
-@vsh:
-    asl a                   ; signed doubling, `depth` times
-    dey
-    bne @vsh
-@vadd:
-    tay                     ; Y = signed delta
     clc
     adc snd_lo
     sta snd_lo
@@ -615,7 +636,6 @@ pat_empty:
     beq :+
     ora #FLAG_STEADY
 :   sta ch_flag,x
-@rts:
     rts
 
 @mute:
@@ -627,9 +647,17 @@ pat_empty:
     rts
 .endproc
 
-; Vibrato shape: one cycle of a signed triangle, 16 steps.
+; Vibrato shapes: one cycle of a signed triangle at four depths. The high nibble
+; of the index picks the depth (inst_vibd), the low nibble is the phase.
 vib_tab:
-    .byte 0, 1, 2, 3, 3, 3, 2, 1, 0, $FF, $FE, $FD, $FD, $FD, $FE, $FF
+    .byte  0,  1,  2,  3,  3,  3,  2,  1
+    .byte  0, $FF,$FE,$FD,$FD,$FD,$FE,$FF
+    .byte  0,  2,  4,  6,  6,  6,  4,  2
+    .byte  0, $FE,$FC,$FA,$FA,$FA,$FC,$FE
+    .byte  0,  3,  6,  9,  9,  9,  6,  3
+    .byte  0, $FD,$FA,$F7,$F7,$F7,$FA,$FD
+    .byte  0,  5, 10, 15, 15, 15, 10,  5
+    .byte  0, $FB,$F6,$F1,$F1,$F1,$F6,$FB
 
 ; -----------------------------------------------------------------------------
 ; SoundSfx — A = sfx id. $00/$FF cancels whatever is playing.

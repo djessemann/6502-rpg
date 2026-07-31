@@ -166,11 +166,15 @@ OB_TRIG  = 8
 ; --- GS_FIELD: walking -------------------------------------------------------
 .proc StField
     jsr UpdateHero
+    jsr UpdateCamera            ; ALWAYS: a trigger or encounter fired by the
+                                ; landing step leaves the camera one frame
+                                ; stale, and every window's geometry is
+                                ; computed from cam_tx/cam_ty
     lda gamestate               ; UpdateHero may have started a battle or a
     cmp #GS_FIELD               ; warp: the rest of this state must not run
     beq :+
     rts
-:   jsr UpdateCamera
+:
     jsr StreamCheck
     jsr BuildOAM
     lda ent_state
@@ -1895,7 +1899,8 @@ OB_TRIG  = 8
     lsr a
     lsr a
     and #7
-    sta tmpa                    ; attribute column 0..7
+    sta atr_col                 ; attribute column 0..7 (NOT tmpa: the CellAt
+                                ; in the loop below uses tmpa as scratch)
     lda tmpc
     lsr a
     and #1
@@ -1936,7 +1941,7 @@ OB_TRIG  = 8
     asl a
     asl a
     clc
-    adc tmpa
+    adc atr_col
     tax
     lda atr_qy
     asl a
@@ -1994,7 +1999,7 @@ OB_TRIG  = 8
     asl a
     asl a
     clc
-    adc tmpa
+    adc atr_col
     sta tmp4                    ; shadow index
     clc
     adc #$C0

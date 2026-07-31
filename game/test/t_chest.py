@@ -106,23 +106,21 @@ def text_region(f):
 
 build()
 
-
-def walk(r, route):
-    for d in route:
-        r.step(press(d), 8)      # a 16px cell at 2px/frame is exactly 8 frames
-        r.step([0] * 8, 2)       # release, or the held button starts another
+# The item chest is reached by a long route that crosses a story trigger. With
+# the window-aware walker that is no longer a problem, so this is asserted now.
+from play import Player, route_between as _rb
 
 
 def open_chest_run(gx, gy, tag):
     """A fresh boot per chest: some chests sit in a wing whose only link to the
     rest of the floor is the entrance tile, which warps the party out."""
-    r = Run(rom=ROM)
-    r.idle(20)
-    walk(r, route_between((12, 18), (gx, gy)))
-    r.idle(10)
-    r.tap(A, 3, 50)
-    r.shot(f"chest_{tag}")
-    return r, text_region(r.frame)
+    m, prop = _map()
+    warps = {(o[1], o[2]) for o in m.objects if o[0] == OB_WARP}
+    p = Player(ROM)
+    p.walk(_rb(m, prop, (12, 18), (gx, gy), avoid=warps))
+    p.tap(A, 3, 50)
+    p.shot(f"chest_{tag}")
+    return p, text_region(p.frame)
 
 
 ok = True
@@ -132,7 +130,7 @@ r, first = open_chest_run(cx, cy, "1_credits")
 if first == 0:
     print("FAIL: no window appeared when the chest was opened"); ok = False
 
-r.tap(A, 3, 60)                      # close, then open the same chest again
+r.tap(A, 3, 60)
 r.idle(20)
 r.tap(A, 3, 50)
 second = text_region(r.frame)
@@ -143,30 +141,23 @@ if first == second:
 else:
     print("ok   re-opening the same chest shows different text")
 
-# --- informational: the item-chest path is NOT yet verified -------------------
-# A long scripted walk to (33,5) does not land on the chest - the party ends up
-# short of it and the window says "nothing happens". The credits path above is
-# the same code, so this is a walk/pathing problem in the test (or a collision
-# mismatch between TryStep and the tileset prop table), not obviously a chest
-# bug. Reported, not asserted, until it is understood.
 ix, iy, _f, item_id = next(c for c in chests() if c[3])
-r3 = Run(rom=ROM)
-r3.idle(20)
-walk(r3, route_between((12, 18), (ix, iy)))
-r3.idle(10)
-r3.tap(A, 3, 30)
-baseline = np.asarray(r3.frame)[168:184, 8:200, :].copy()   # the first text line
-r3.shot("chest_3_item")
-r4 = Run(rom=ROM)                       # what "nothing happens" looks like here
-r4.idle(20)
-walk(r4, route_between((12, 18), (ix, iy))[:-1])
-r4.idle(10)
-r4.tap(A, 3, 30)
-nothing = np.asarray(r4.frame)[168:184, 8:200, :]
-same = bool((baseline == nothing).all())
-print(f"info the item chest at ({ix},{iy}) (item id {item_id}) is "
-      f"{'NOT reached by the scripted walk' if same else 'reached'}"
-      " - see the comment in this file")
+print(f"item chest at ({ix},{iy}), item id {item_id}")
+p3, third = open_chest_run(ix, iy, "3_item")
+# Control: the SAME cell, once the chest has been emptied. Standing one cell
+# short does not work - pressing A there talks to the chest anyway, because the
+# engine checks the cell the party faces.
+p3.tap(A, 3, 60)
+p3.idle(20)
+p3.tap(A, 3, 50)
+emptied = text_region(p3.frame)
+p3.shot("chest_4_emptied")
+if third == 0:
+    print("FAIL: the item chest showed nothing"); ok = False
+elif third == emptied:
+    print("FAIL: the item chest reads the same once emptied"); ok = False
+else:
+    print("ok   the item chest pays out its item, then reads as taken")
 
 print("PASS" if ok else "FAILED")
 sys.exit(0 if ok else 1)

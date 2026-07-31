@@ -24,7 +24,7 @@
 .import DrawPrompt, ClearPrompt, RowSegs, WriteRowSegs, FillRowSegs
 .import BattleEnter, BattleTick, InitParty, RollEncounter
 .import PutNumber, PutString, Mul8
-.import item_names
+.import item_names, boss_by_map
 .import SetPrgCode
 
 DIR_UP    = 0
@@ -73,6 +73,7 @@ OB_TRIG  = 8
     lda #0
     sta gamestate
     sta game_flags
+    jsr InitStoryState
 
     lda #BATTLE_BANK
     jsr SetPrgCode
@@ -107,6 +108,13 @@ OB_TRIG  = 8
     jsr SyncHeroPixels
     jsr UpdateCamera
     jsr DrawFullMap
+    rts
+.endproc
+
+.proc InitStoryState
+    lda #$FF
+    sta pend_form
+    sta pend_flag
     rts
 .endproc
 
@@ -165,6 +173,18 @@ OB_TRIG  = 8
     beq @done
     lda #GS_FIELD
     sta gamestate
+    lda pend_form               ; a trigger armed a boss: fight it now
+    cmp #$FF
+    beq @done
+    pha
+    lda #$FF
+    sta pend_form
+    lda #GS_BATTLE
+    sta gamestate
+    lda #BATTLE_BANK
+    jsr SetPrgCode
+    pla
+    jsr BattleEnter
 @done:
     rts
 .endproc
@@ -435,6 +455,85 @@ OB_TRIG  = 8
 .endproc
 
 ; =============================================================================
+; Story triggers
+; =============================================================================
+; Stepping onto an OB_TRIG whose story flag is still clear plays its scene.
+; If the map has a boss (boss_by_map), the trigger arms it: the fight starts
+; when the message window closes, and the flag is set only once it is won, so
+; losing or reloading leaves the trigger armed.
+.proc CheckTrigger
+    lda ent_gx
+    sta tgt_gx
+    lda ent_gy
+    sta tgt_gy
+    jsr FindObject
+    bcc @none
+    ldx obj_i
+    lda ent_kind,x
+    cmp #OB_TRIG
+    bne @none
+    lda ent_tile,x              ; a0 = story flag id
+    sta tmpa
+    jsr StoryFlagSet
+    bcs @none                   ; already played
+    ldx map_id
+    lda boss_by_map,x
+    sta pend_form               ; $FF when this map has no boss
+    cmp #$FF
+    beq @noboss
+    lda tmpa
+    sta pend_flag               ; set once the fight is won
+    jmp @say
+@noboss:
+    lda #$FF
+    sta pend_flag
+    lda tmpa                    ; a scene with no fight: mark it seen now
+    jsr MarkStory
+@say:
+    ldx obj_i
+    lda ent_arg,x               ; a2 = the scene's message
+    jmp ShowMessage
+@none:
+    rts
+.endproc
+
+; A = story flag id -> carry set if it has already happened.
+.proc StoryFlagSet
+    pha
+    lsr a
+    lsr a
+    lsr a
+    tay
+    pla
+    and #7
+    tax
+    lda story_flags,y
+    and bit_tab,x
+    beq @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+; A = story flag id: record it.
+.proc MarkStory
+    pha
+    lsr a
+    lsr a
+    lsr a
+    tay
+    pla
+    and #7
+    tax
+    lda story_flags,y
+    ora bit_tab,x
+    sta story_flags,y
+    rts
+.endproc
+
+; =============================================================================
 ; Treasure chests
 ; =============================================================================
 ; X = the chest's entity slot. Object bytes are
@@ -656,6 +755,7 @@ OB_TRIG  = 8
     jsr DrawFullMap
     rts
 .endproc
+
 
 ; =============================================================================
 ; Map loading
@@ -2005,6 +2105,10 @@ OB_TRIG  = 8
     lda gamestate
     cmp #GS_FIELD
     bne @out
+    jsr CheckTrigger
+    lda gamestate
+    cmp #GS_FIELD
+    bne @out
     jsr CheckEncounter
 @out:
     rts
@@ -2059,7 +2163,15 @@ OB_TRIG  = 8
     lda btl_result
     cmp #2                      ; party wiped
     beq @over
-    jsr ReturnToField
+    cmp #3                      ; victory: an armed boss is now beaten
+    bne :+
+    lda pend_flag
+    cmp #$FF
+    beq :+
+    jsr MarkStory
+    lda #$FF
+    sta pend_flag
+:   jsr ReturnToField
     lda #GS_FIELD
     sta gamestate
     rts

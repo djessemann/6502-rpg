@@ -208,3 +208,5 @@ pend_kind     = $CB     ; a detail line to add under the next message:
 pend_lo       = $CC     ;   0 none, 1 = "<n> CREDITS", 2 = an item name
 pend_hi       = $CD
 pend_item     = $CE
+pend_form     = $CF     ; a boss to fight once the message window closes ($FF)
+pend_flag     = $D0     ; the story flag that boss's victory sets ($FF none)

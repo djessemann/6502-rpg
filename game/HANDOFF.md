@@ -18,6 +18,7 @@ python3 test/t_town.py     # overworld -> Landfall warp
 python3 test/t_sound.py    # driver liveness + negative control
 python3 test/t_chest.py    # opening a chest, and its flag sticking
 python3 test/t_inn.py      # resting, and being refused when broke
+python3 test/t_story.py    # a trigger plays, arms its boss, and never replays
 python3 tools/check_areas.py    # every area map: reachability, objects, ids
 python3 tools/music_check.py    # song data vs the bytes in the built ROM
 ```
@@ -130,20 +131,38 @@ The shop and save objects already exist on all six town maps
 fall through to "nothing happens". `battle.s` has working list-selection code
 to copy (`BuildTechList`, `StartItemSel`, and the `UiFlush` pacer).
 
-**3. Progression.** Chests are **done** (see below). Story flags for the four Anchor Sparks,
+**3. Progression.** Chests and story triggers are **done**. Remaining: story flags for the four Anchor Sparks,
 PASSKEY / SKIFF / LIFT CODE / RIFT KEY gating, and `PROP_WATER` / `PROP_HIGH`
 checks in `TryStep` against the `vehicles` byte.
 
-**4. Bosses and the ending.** `OB_TRIG` objects already sit in front of each
-Anchor core. Wire them to `BattleEnter` with the boss formations (`FORM_*`
-constants exist), set the arc's story flag on victory, then the Rift, the two
-ARCHON stages and the ending text (all seven boss messages and the six ending
-pages are already written in `tools/script_text.py`).
+**4. Bosses and the ending.** Triggers now arm bosses and set their story flag
+on victory (`CheckTrigger` in `field.s`, `boss_by_map` generated into the
+engine bank). Remaining:
+  * **ARCHON PRIME.** Beating THE ARCHON on Erebus 4 currently just ends the
+    fight. The second stage needs chaining: on victory over `FORM_THE_ARCHON`,
+    arm `FORM_ARCHON_PRIME` instead of clearing `pend_form`.
+  * **The ending.** Nothing runs after the last boss; `MSG_END_*` is written
+    and unused.
+  * **Post-victory scenes.** A trigger shows one message before its fight and
+    nothing after. The Anchor Spark / reward lines in `script_text.py` want a
+    second message id on the object, or a convention like "flag message + 1".
+  * The four Anchor Sparks are only story *flags* today - nothing reads them,
+    so nothing gates on having relit an Anchor.
 
 **5. QA.** A scripted headless playthrough that reaches the ending, plus review
 agents on balance and on the engine's remaining scratch-register discipline.
 
 -----
+
+## How a scene works now
+
+`CheckTrigger` fires when the party *lands* on an `OB_TRIG` cell whose story
+flag is clear. If `boss_by_map[map_id]` names a boss, the trigger arms it in
+`pend_form` and remembers the flag in `pend_flag`; the scene's message plays,
+and `StBoxClose` starts the fight when the window finishes closing. The flag is
+set only when the battle is *won* — so losing, fleeing or reloading leaves the
+trigger armed, and the boss can be retried. A trigger with no boss sets its flag
+immediately and never plays again.
 
 ## Open threads left by the chest work
 

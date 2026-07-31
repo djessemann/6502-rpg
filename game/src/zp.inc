@@ -213,3 +213,15 @@ pend_flag     = $D0     ; the story flag that boss's victory sets ($FF none)
 msg_chain     = $D1     ; extra consecutive message ids to show after this one
 chain_n       = $D2     ; ShowMessageChain's count (tmpa is SetMessage scratch)
 atr_col       = $D3     ; AttrColUpdate's attribute column (CellAt eats tmpa)
+
+; --- title screen / save ($D4-$E3) -------------------------------------------
+ti_state      = $D4     ; 0 = the menu, 1 = picking a squad, 2 = ready?
+ti_cursor     = $D5
+ti_slot       = $D6     ; which party slot is being filled
+ti_dirty      = $D7     ; 2 - bitmask of screen rows 8..23 needing a redraw
+ti_row        = $D9
+ti_tmp        = $DA
+ti_tmp2       = $DB
+ti_has_save   = $DC     ; a valid save was found in the battery at boot
+ti_sum        = $DD     ; 2 - checksum accumulator
+ti_cnt        = $DF

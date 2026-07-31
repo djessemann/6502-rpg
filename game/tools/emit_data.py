@@ -22,6 +22,7 @@ def emit(f, base_bank, mon_sizes=None):
     exports = ["mon_tab", "mon_names", "item_tab", "item_names", "tech_tab",
                "tech_names", "class_tab", "class_names", "xp_tab", "form_tab",
                "zone_tab", "shop_tab", "shop_len", "inn_tab", "learn_tab",
+               "class_vets",
                "learn_idx"]
     for e in exports:
         f.write(f".export {e}\n")
@@ -43,16 +44,19 @@ def emit(f, base_bank, mon_sizes=None):
     block("mon_names", [_name(m[0]) for m in G.MONSTERS])
 
     # --- items ---------------------------------------------------------------
+    # byte 7 is the status mask an effect-2 (cure) item clears.
     items = []
     for (nm, kind, power, price, mask, eff) in G.ITEMS:
         items.append([kind, power & 255, power >> 8, price & 255, price >> 8,
-                      mask, eff, 0])
+                      mask, eff, G.ST_ALL if eff == 2 else 0])
     block("item_tab", items)
     block("item_names", [_name(i[0]) for i in G.ITEMS])
 
     # --- techs ---------------------------------------------------------------
-    block("tech_tab", [[sch, tier, min(pw, 255), el, tg, 0]
-                       for (nm, sch, tier, pw, el, tg) in G.TECHS])
+    # byte 5 is the status mask: inflicted by an offensive tech, cured by a
+    # support one (see the TECHS comment in gamedata.py).
+    block("tech_tab", [[sch, tier, min(pw, 255), el, tg, st]
+                       for (nm, sch, tier, pw, el, tg, st) in G.TECHS])
     block("tech_names", [_name(t[0]) for t in G.TECHS])
 
     # --- classes -------------------------------------------------------------
@@ -61,6 +65,8 @@ def emit(f, base_bank, mon_sizes=None):
         cls.append(list(base) + list(grow) + [school, mask, 0, 0])
     block("class_tab", cls)
     block("class_names", [_name(c[0]) for c in G.CLASSES])
+    # the veteran title each class grows into; the muster screen shows it
+    block("class_vets", [_name(c[5]) for c in G.CLASSES])
 
     # --- xp curve (3 bytes per level) ---------------------------------------
     block("xp_tab", [[x & 255, (x >> 8) & 255, (x >> 16) & 255]

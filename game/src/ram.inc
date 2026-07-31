@@ -194,3 +194,16 @@ map_ptr_hi     = $6D69
 snd_state      = $6E00      ; ...through $6EFF
 
 ; $6F00-$7FFF spare
+
+; --- the saved game ($6200-$63FF) --------------------------------------------
+; The live game state IS the $6000 block, so a "save" is a copy of it into a
+; second slot and a "load" is a copy back. Without the copy every step the
+; party took would already be permanent, and dying would overwrite the file.
+slot_magic     = $6200      ; 4: "THRN"
+slot_sum       = $6204      ; 2: 16-bit sum of the 506 bytes that follow
+slot_data      = $6206      ; 506: a copy of $6006..$61FF
+SLOT_LEN       = SAVE_CKEND - sav_version    ; 506
+
+; Chosen at the title screen, read by InitParty ($FF = "use the default four").
+party_class    = $6F00      ; 4
+ti_rowq        = $6F04      ; 24: title-screen row redraw queue (screen row 2+)

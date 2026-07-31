@@ -128,8 +128,12 @@ def build_overworld_grid():
     _rect(g, 4, 44, 14, 52, "RIDGE", only=["ASH", "DUNE", "SCRUB", "DEEP"])
     _scatter(g, rnd, "RIDGE", "CRAG", 18)
 
-    # the Rift: a ring of crag around a dead centre
-    _ell(g, 64, 58, 9, 8, "CRAG", only=["ASH", "SCRUB", "RIDGE", "GLASS"])
+    # The Rift: a rampart of high ground around a dead centre, with Lastport
+    # inside it. RIDGE, not CRAG -- CRAG is plain solid and nothing in the game
+    # can ever cross it, which sealed the endgame dungeon and a whole town
+    # behind terrain no vehicle opens. The grav-lift crosses RIDGE, so the last
+    # act of the game is what unlocks the basin.
+    _ell(g, 64, 58, 9, 8, "RIDGE", only=["ASH", "SCRUB", "CRAG", "GLASS"])
     _ell(g, 64, 58, 5, 4, "GLASS")
 
     # --- coastline: a shallow shelf everywhere land meets deep water ---------

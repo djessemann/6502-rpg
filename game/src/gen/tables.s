@@ -76,3 +76,10 @@ boss_by_map:
     .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,FORM_MAGMA_HULK,$FF,$FF,FORM_ABYSS_WARDEN,$FF,$FF,FORM_SERAPH,$FF,$FF,FORM_NULLCOLOSSUS,$FF,$FF,$FF,$FF,$FF,$FF,$FF,FORM_RIFT_SENTINL,FORM_THE_ARCHON
 spr_palette:
     .byte $0F,$17,$27,$30,$0F,$11,$21,$30,$0F,$19,$29,$30,$0F,$05,$16,$30
+.export gate_flag, gate_msg, boon_tab
+gate_flag:
+    .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF,$01,$FF,$FF,$03,$FF,$FF,$05,$FF,$FF,$01,$05,$FF,$01,$FF,$07,$FF,$FF,$FF
+gate_msg:
+    .byte $96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$96,$97,$96,$96,$96,$96,$98,$96,$96,$96
+boon_tab:
+    .byte $00,$00,$00,$01,$00,$02,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00

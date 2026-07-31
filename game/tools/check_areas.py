@@ -73,6 +73,50 @@ def flood(m, prop, start):
     return seen
 
 
+def wings(m, prop, entry, warps):
+    """Connected components of the walkable graph with warp cells removed.
+
+    Stepping onto a warp *takes* you somewhere, so a warp cell is a one-way
+    door, not a corridor. A floor whose only link between two halves is a warp
+    reads as a bug to a player: you walk into a wing, open its chest, and the
+    only way back is out of the dungeon and in again. `flood` cannot see that,
+    because it floods straight over the warp.
+
+    Returns the components (as sets) that touch `entry`, largest first.
+    """
+    w, h = m.w, m.h
+    blocked = set(warps) - {entry}
+
+    def open_cell(x, y):
+        return not (prop[m.grid[y][x]] & PROP_SOLID) and (x, y) not in blocked
+
+    seen, comps = set(), []
+    for sx, sy in _neighbours(m, entry):
+        if not open_cell(sx, sy) or (sx, sy) in seen:
+            continue
+        comp, stack = {(sx, sy)}, [(sx, sy)]
+        seen.add((sx, sy))
+        while stack:
+            x, y = stack.pop()
+            for nx, ny in _neighbours(m, (x, y)):
+                if (nx, ny) in comp or (nx, ny) == entry or not open_cell(nx, ny):
+                    continue
+                comp.add((nx, ny))
+                seen.add((nx, ny))
+                stack.append((nx, ny))
+        comps.append(comp)
+    comps.sort(key=len, reverse=True)
+    return comps
+
+
+def _neighbours(m, cell):
+    x, y = cell
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < m.w and 0 <= ny < m.h:
+            yield nx, ny
+
+
 def check_map(m, compiled, msg_names, errors):
     prop = compiled[m.tileset.name]["prop"]
     names = [n for n, _, _, _ in m.tileset.metas]
@@ -123,6 +167,21 @@ def check_map(m, compiled, msg_names, errors):
     cells = [(o[1], o[2]) for o in m.objects]
     if len(set(cells)) != len(cells):
         bad("two objects share a cell")
+
+    # Every map is cut in two by its own entrance: the apron you arrive on sits
+    # outside the gate, and the gate cell is the warp. That is the design. What
+    # is *not* is a wing off the main body holding something you have to walk
+    # back from — a chest, a shop, a save point, a stair down. Reaching it would
+    # cost a trip out of the map and in again.
+    parts = wings(m, prop, entry, [(o[1], o[2]) for o in warps])
+    strand = (OB_CHEST, OB_SHOP, OB_INN, OB_SAVE, OB_WARP)
+    for part in parts[1:]:
+        stuck = [o for o in m.objects
+                 if o[0] in strand and (o[1], o[2]) in part]
+        for kind, gx, gy, *_ in stuck:
+            bad(f"{KIND_NAME[kind]} at {gx},{gy} is in a {len(part)}-cell wing "
+                f"whose only link to the rest of the map is the warp at "
+                f"{entry} — you cannot walk back")
 
 
 def check_links(maps, errors):

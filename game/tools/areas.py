@@ -475,6 +475,19 @@ def carve(w, h, rooms, floor):
     return c
 
 
+def gate(c, floor='%'):
+    """The door on (12,18), with the wall beside it cut through.
+
+    Landing on a warp cell warps you, so a one-cell doorway would make the
+    entrance porch a separate wing: walk down to the save terminal and the only
+    way back into the floor is out of the dungeon and in again. Widening the
+    threshold to three cells leaves the door as the way out and gives the porch
+    an ordinary link to the hall.
+    """
+    c.rect(11, 18, 13, 18, floor)
+    c.put(12, 18, 'D')
+
+
 def _dmap(name, ts, c, zone, rate=14, flags=MF_DUNGEON, mirror=False):
     rows = c.rows()
     if mirror:
@@ -497,7 +510,7 @@ def cinder1(ts):
         (32, 8, 33, 8),           # gallery link
         (30, 4, 36, 7),           # upper cell
     ], '%')
-    c.put(12, 18, 'D')
+    gate(c)
     c.rect(8, 4, 11, 5, '~')
     c.rect(29, 12, 32, 13, '~')
     c.scatter([(14, 4), (16, 4), (14, 6), (16, 6),
@@ -598,7 +611,7 @@ def tide1(ts):
         (16, 22, 26, 23),         # south corridor
         (22, 24, 28, 29),         # south cell
     ], ',')
-    c.put(12, 18, 'D')
+    gate(c)
     c.rect(30, 10, 35, 13, 'c')
     c.rect(3, 6, 8, 9, 'c')
     c.rect(23, 26, 27, 28, 'c')
@@ -666,7 +679,7 @@ def storm1(ts):
         (14, 26, 30, 27),         # south gantry
         (31, 24, 37, 30),         # south-east cell
     ], '.')
-    c.put(12, 18, 'D')
+    gate(c)
     c.scatter([(28, 7), (31, 7), (28, 11), (31, 11), (28, 15), (31, 15),
                (28, 19), (31, 19), (5, 8), (7, 12), (12, 12), (15, 16)], 'I')
     c.rect(3, 6, 9, 6, '=')
@@ -740,7 +753,7 @@ def hollow1(ts):
         (33, 10, 37, 14),
         (2, 10, 5, 14),
     ], '.')
-    c.put(12, 18, 'D')
+    gate(c)
     c.scatter([(10, 11), (15, 11), (10, 13), (15, 13),
                (23, 11), (26, 11), (22, 21), (26, 21)], 'I')
     c.rect(34, 11, 36, 13, ' ')
@@ -808,7 +821,7 @@ def causeway(ts):
         (18, 4, 25, 9),           # north cell
         (30, 20, 38, 22),         # south cell
     ], ',')
-    c.put(12, 18, 'D')
+    gate(c)
     c.rect(28, 12, 33, 13, 'c')
     c.rect(3, 6, 6, 9, 'c')
     c.rect(42, 6, 45, 9, 'c')
@@ -839,7 +852,7 @@ def relay1(ts):
         (18, 14, 27, 15),         # spine
         (21, 5, 29, 13),          # dish room
     ], '.')
-    c.put(12, 18, 'D')
+    gate(c)
     c.rect(3, 5, 10, 5, '=')
     c.rect(21, 5, 29, 5, '=')
     c.scatter([(23, 8), (27, 8), (23, 11), (27, 11), (10, 14), (15, 14)], 'I')
@@ -891,7 +904,7 @@ def ossuary1(ts):
         (2, 6, 10, 12),           # west lobe
         (3, 16, 6, 21),           # side pocket
     ], '%')
-    c.put(12, 18, 'D')
+    gate(c)
     c.scatter([(4, 8), (8, 8), (4, 11), (22, 8), (26, 8), (22, 12), (26, 12),
                (9, 15), (14, 15), (5, 19)], 'R')
     c.put(27, 8, '>')
@@ -946,7 +959,7 @@ def erebus1(ts):
         (28, 18, 36, 25),
         (2, 10, 7, 20),           # port bay
     ], '.')
-    c.put(12, 18, 'D')
+    gate(c)
     c.scatter([(22, 8), (25, 8), (22, 11), (25, 11), (31, 6), (35, 6),
                (31, 10), (35, 10), (30, 20), (34, 20), (30, 24), (34, 24),
                (4, 13), (4, 17)], 'I')

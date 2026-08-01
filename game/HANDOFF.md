@@ -43,6 +43,7 @@ python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
 python3 test/t_apu.py        # the ROM actually plays notes (slow: ~3 min)
 python3 test/t_arena.py      # the battle screen survives a scrolled camera
 python3 test/t_hits.py       # kills clear the arena, hits flash (slow: ~10 min)
+python3 test/t_hud.py        # the HUD keeps up with the party's HP (slow: ~10 min)
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.

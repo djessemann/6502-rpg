@@ -3814,6 +3814,9 @@ HUD_SHADOW = 6              ; hp lo/hi, hpmax lo/hi, tp, status
 
 ; Refresh at most one HUD row per frame. Called from BattleTick.
 .proc HudTick
+.ifdef TEST_HUD_FROZEN
+    rts                     ; t_hud.py's control: the rows freeze at whatever
+.endif                      ; the direct draw left them saying
     ldx #0
 @scan:
     cpx party_n

@@ -77,6 +77,7 @@ K_POWER  = 2
 K_ELEM   = 3
 K_TARGET = 4
 K_STATUS = 5                ; inflicted by an offensive tech, cured by a support
+K_REVIVE = 6                ; HP a fallen ally comes back on (0 = it does not)
 
 ; enemy AI modes (mon_rec+M_AI)
 AI_MELEE  = 0               ; attacks, nothing else
@@ -2663,10 +2664,46 @@ BOX_ROW = 20
     ldx #>s_uses
     jmp MsgTechAll
 @support:
-    ; a support tech can cure, heal, or both; the whole party benefits either
-    ; way (the engine has never asked a support tech for a target).
+    ; a support tech can revive, cure, heal, or any combination; the whole party
+    ; benefits either way (the engine has never asked a support tech for a
+    ; target).
     lda #0
     sta tmp7                ; did anything at all happen?
+    lda tech_rec+K_REVIVE
+    beq @cure0
+    sta tmp4
+    ldx #0
+@revlp:
+    lda b_alive,x
+    bne @revnext
+    lda #1
+    sta b_alive,x
+    lda b_status,x
+    and #<(~ST_DOWN & $FF)
+    sta b_status,x
+    lda tmp4
+    cmp #255
+    bne :+
+    lda b_hpmax,x           ; LAZARUS brings them back whole
+    sta b_hp,x
+    lda b_hpmax+8,x
+    sta b_hp+8,x
+    jmp @revdone
+:   lda #0
+    sta b_hp,x
+    sta b_hp+8,x
+    lda tmp4
+    sta tmp0
+    stx loop_i
+    jsr HealCombatant
+    ldx loop_i
+@revdone:
+    inc tmp7
+@revnext:
+    inx
+    cpx #4
+    bcc @revlp
+@cure0:
     lda tech_rec+K_STATUS
     beq @heal0
     eor #$FF
@@ -4069,7 +4106,31 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     lda #3
     sta inv_ct+3
 .endif
+.ifdef TEST_ALL_TECHS
+    ; every BIO tech on every member, and the TP to cast them: REVIVE is tier 5
+    ; and LAZARUS tier 8, so without this a test would have to grind to reach
+    ; the two techs whose whole job is raising the dead.
+    ldy #0
+    ldx #0
+@techs:
+    lda #$FF
+    sta party+c_bio,y
+    sta party+c_bio+1,y
+    sta party+c_psi,y
+    sta party+c_psi+1,y
+    lda #99
+    sta party+c_tp,y
+    sta party+c_tpmax,y
+    tya
+    clc
+    adc #PARTY_SIZE
+    tay
+    inx
+    cpx #4
+    bne @techs
+.endif
 .ifdef TEST_HURT_PARTY
+.ifndef TEST_DOWN_ONE            ; the two collide: DOWN_ONE also owns slot 1
     ; One member -- slot 1 -- starts on 1 HP and poisoned, so a test can watch a
     ; heal and a cure actually do something while every other member stays at
     ; full health, which is the case where they must correctly refuse.
@@ -4080,6 +4141,7 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     sta party+c_hp+1,y
     lda #ST_POISON
     sta party+c_status,y
+.endif
 .endif
     rts
 .endproc

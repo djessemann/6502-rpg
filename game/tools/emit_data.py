@@ -4,7 +4,7 @@ import font
 
 MON_REC = 16
 ITEM_REC = 8
-TECH_REC = 6
+TECH_REC = 7
 CLASS_REC = 16
 NAME_LEN = 13          # 12 characters + $FF
 
@@ -55,8 +55,8 @@ def emit(f, base_bank, mon_sizes=None):
     # --- techs ---------------------------------------------------------------
     # byte 5 is the status mask: inflicted by an offensive tech, cured by a
     # support one (see the TECHS comment in gamedata.py).
-    block("tech_tab", [[sch, tier, min(pw, 255), el, tg, st]
-                       for (nm, sch, tier, pw, el, tg, st) in G.TECHS])
+    block("tech_tab", [[sch, tier, min(pw, 255), el, tg, st, rv]
+                       for (nm, sch, tier, pw, el, tg, st, rv) in G.TECHS])
     block("tech_names", [_name(t[0]) for t in G.TECHS])
 
     # --- classes -------------------------------------------------------------

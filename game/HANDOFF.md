@@ -39,6 +39,7 @@ python3 test/t_ending.py     # THE ARCHON -> ARCHON PRIME -> the ending
 python3 test/t_menu.py       # START: item, equip, tech, the character sheet
 python3 test/t_shop.py       # buying, selling, and a save terminal
 python3 test/t_item.py       # who a battle item is for, and revive
+python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.
@@ -189,22 +190,25 @@ a `.sav`, but confirming that end needs one of those emulators.
 
 ## Next work, in order
 
-**1. Random encounters are trivial past the early game.** Most resolve in 1-2
-rounds for under 5% HP; party ATK and the gear economy outscale monster HP/DEF.
-Needs a pass over the 30 non-boss monsters or over shop prices. This is now the
-largest thing standing between the game and feeling finished.
+**1. A scripted playthrough that reaches the ending.** `t_journey.py` plays the
+shipped ROM through the title, the muster, a warp, the menu and a walk, but it
+walks two cells, not eighty. A long scripted walk does not reliably arrive: one
+blocked step -- a mountain the route thought was open, a battle that ends on a
+different frame parity -- desynchronises the rest of the path, and nothing in a
+frame tells the walker where the party actually is. The fix is a test-only
+build define that draws `ent_gx`/`ent_gy` somewhere on screen, so the walker can
+read its own position and correct. Everything else needed is already in
+`test/play.py`.
 
-**2. The REVIVE and LAZARUS *techs*** still do nothing. The revive *item* path
-works (`UseItem` effect 3, and the field menu's), but a tech with zero power and
-zero status mask reads as a no-op, so the two that raise the dead are inert.
-They need an explicit "this tech revives" bit in `tech_tab` rather than being
-inferred.
-
-**3. A scripted playthrough that reaches the ending** without test defines, as
-one long QA run. `test/play.py` has the window-aware walker it needs.
-
-**4. Art.** The four Anchor core floors share one plan varied only by material,
+**2. Art.** The four Anchor core floors share one plan varied only by material,
 and it shows on `test/shots/areas.png`.
+
+**3. The early game is still soft.** After the encounter pass, levels 10-24 are
+3-5 round fights costing 10-30% HP, but levels 2-8 still resolve in one or two
+rounds. Four characters against three low-tier monsters is four attacks against
+three targets, and no amount of HP fixes that shape -- it needs either smaller
+early parties or bigger early groups, and both are design decisions rather than
+tuning.
 
 -----
 
@@ -229,6 +233,28 @@ them consecutively for exactly this — `MSG_STORY_CINDER_CORE`, `_RELIGHT`,
 scene. The count lives in `chain_n`, **not** `tmpa`: `SetMessage` uses `tmpa`
 as scratch, and stashing it there made the chain length come back as the
 message id and walk off the end of the table into garbage.
+
+## Where the difficulty lives
+
+`tools/balance.py` simulates every formation at the level the player actually
+reaches it and prints win rate, rounds and HP lost. Run it after touching any
+number in `gamedata.py`. It found 55 of 62 random encounters ending in one or
+two rounds for under 5% of the party's health -- a game the player holds A
+through -- and three things came out of fixing that:
+
+* `ENC_HP_GAIN` / `ENC_ATK_GAIN` / `ENC_DEF_GAIN` scale the rank-and-file with
+  tier. The hand-written numbers in `MONSTERS` are a shape, not a scale; party
+  ATK had outrun them. Bosses are excluded and keep their authored values.
+* `ZONES` is authored against the level each zone is reached at, not by theme
+  alone. It used to put the same tier-3 monsters in a level-4 zone and a
+  level-8 one, and the three endgame zones all drew from the same five
+  formations.
+* `FORMATIONS` gives early encounters one body per party member. Two monsters
+  against four characters cannot survive a round however much HP they have.
+
+The target is 3-4 rounds and 10-25% HP for an ordinary encounter, and no random
+encounter that can wipe a party at the level it appears. ARCHON PRIME sits at
+about 75%, which is where a final boss should be.
 
 ## Gating, and where it is authored
 

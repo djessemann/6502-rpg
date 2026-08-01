@@ -920,7 +920,8 @@ SLOT_ROW  = 6           ; WEAPON / ARMOUR / SHIELD / HELM
     bne @battle
     lda ui_trec+2
     ora ui_trec+5
-    beq @battle                 ; no heal and no cure: nothing it can do here
+    ora ui_trec+6               ; ...or it raises the dead
+    beq @battle                 ; nothing it can do here
     lda ui_who
     jsr PartyOfs
     lda party+c_tp,y
@@ -994,6 +995,35 @@ SLOT_ROW  = 6           ; WEAPON / ARMOUR / SHIELD / HELM
     lda #0
     sta ui_c                    ; how many things this did
 
+    lda ui_trec+6               ; HP a fallen ally comes back on
+    beq @cure
+    ldy ui_b
+    lda party+c_status,y
+    and #ST_DOWN
+    beq @cure                   ; they are standing; nothing to raise
+    lda party+c_status,y
+    and #<(~ST_DOWN & $FF)
+    sta party+c_status,y
+    lda #0
+    sta party+c_hp,y
+    sta party+c_hp+1,y
+    lda ui_trec+6
+    cmp #255
+    bne :+
+    lda party+c_hpmax,y         ; LAZARUS brings them back whole
+    sta party+c_hp,y
+    lda party+c_hpmax+1,y
+    sta party+c_hp+1,y
+    jmp @revived
+:   sta ui_rec+1
+    lda #0
+    sta ui_rec+2
+    ldy ui_b
+    jsr HealHp
+@revived:
+    inc ui_c
+
+@cure:
     lda ui_trec+5               ; the status bits this tech cures
     beq @heal
     and #<(~ST_DOWN & $FF)      ; no mask ever raises the dead

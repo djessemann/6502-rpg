@@ -74,8 +74,20 @@ def cursor_row(r, rows):
     return None
 
 
-def move_to(r, rows, label):
-    """Put the cursor on the row containing `label`. True if it got there."""
+def move_to(r, rows, label, scroll=40):
+    """Put the cursor on the row containing `label`. True if it got there.
+
+    Lists scroll -- the test build shows three rows at a time -- so an entry
+    that is not on screen yet is not absent. This walks the cursor down until
+    the label appears, then closes the remaining distance.
+    """
+    for _ in range(scroll):
+        tgt = next((i for i in rows if label in glyphs.line(r.frame, i)), None)
+        if tgt is not None:
+            break
+        r.tap(DOWN, 3, 18)
+    else:
+        return False
     for _ in range(len(rows) + 3):
         tgt = next((i for i in rows if label in glyphs.line(r.frame, i)), None)
         if tgt is None:
@@ -324,6 +336,43 @@ check(not glyphs.says(r.frame, "STATUS"), "and the menu is gone")
 r.step(press(DOWN), 8)
 r.step([0] * 8, 4)
 check(r.nonblack() > 20000, "and the party can walk")
+
+# =============================================================================
+print("\nREVIVE raises a fallen member")
+# Its own ROM: this one starts a member down and hands the party every tech,
+# because REVIVE is tier 5 and LAZARUS tier 8 -- reaching them honestly would
+# mean grinding to level 20 inside a test.
+REV = GAME / "test" / "threnos_menu_rev.nes"
+build(REV, ["-D", "TEST_DOWN_ONE=1", "-D", "TEST_ALL_TECHS=1"])
+rv = Run(rom=REV)
+rv.idle(30)
+rv.tap(START, 3, 60)
+check(pick(rv, TOP_ROWS, "TECH") and pick(rv, WHO_ROWS, "SOLDIER"),
+      "TECH opens on a member who knows everything")
+check(move_to(rv, LIST_ROWS, "REVIVE"), "REVIVE is listed")
+rv.tap(A, 3, 45)
+check(glyphs.line(rv.frame, 1).strip() == "ON WHOM", "REVIVE asks for a target")
+down = [i for i in WHO_ROWS
+        if glyphs.line(rv.frame, i + 1).strip().startswith("HP    0/")]
+check(bool(down), f"the fallen member is listed at 0 HP "
+      f"({[glyphs.line(rv.frame, i + 1).strip() for i in WHO_ROWS]})")
+if down:
+    while cursor_row(rv, WHO_ROWS) != down[0]:
+        rv.tap(DOWN, 3, 20)
+    rv.tap(A, 3, 60)
+    check(glyphs.says(rv.frame, "DONE"), "and it revives them")
+    check(to_roster(rv), "and comes back to the roster")
+    hp = glyphs.line(rv.frame, down[0] + 1).strip()
+    check(not hp.startswith("HP    0/"),
+          f"the fallen member is up ({hp!r})")
+
+# ...and does nothing to someone who is already standing
+check(pick(rv, TOP_ROWS, "TECH") and pick(rv, WHO_ROWS, "SOLDIER")
+      and move_to(rv, LIST_ROWS, "REVIVE"), "REVIVE can be cast again")
+rv.tap(A, 3, 45)
+rv.tap(A, 3, 60)
+check(glyphs.says(rv.frame, "NO EFFECT"),
+      "REVIVE on someone standing says NO EFFECT")
 
 print()
 if FAIL:

@@ -88,7 +88,12 @@ ITEMS = [
 ]
 
 # --- techs -------------------------------------------------------------------
-# name, school (1 PSI / 2 BIO), tier 1..8, power, element, target, status
+# name, school (1 PSI / 2 BIO), tier 1..8, power, element, target, status,
+# revive (HP restored to a fallen ally; 0 = this tech does not raise the dead)
+#
+# `revive` has to be its own column. REVIVE and LAZARUS have no power and no
+# cure mask, so every reader treated them as no-ops -- the two techs whose
+# whole job is raising the dead were the two that did nothing at all.
 #
 # `status` is a mask of the ST_* bits in src/ram.inc and means two different
 # things depending on which side of the target list the tech is on:
@@ -113,38 +118,38 @@ TG_ONE_ENEMY, TG_ALL_ENEMY, TG_ONE_ALLY, TG_ALL_ALLY, TG_SELF = range(5)
 # clear to 31% (STUN) and 17% (SILENCE) on nothing but that change. All-target
 # techs get POISON or BLIND, which cost the party throughput rather than turns.
 TECHS = [
-    ("SPARK",   1, 1, 14, EL_SHOCK, TG_ONE_ENEMY, 0),
-    ("CHILL",   1, 1, 12, EL_ICE,   TG_ONE_ENEMY, ST_STUN),
-    ("JOLT",    1, 2, 16, EL_SHOCK, TG_ALL_ENEMY, ST_BLIND),
-    ("SCAN",    1, 2,  0, EL_NONE,  TG_ONE_ENEMY, 0),
-    ("FLARE",   1, 3, 34, EL_FIRE,  TG_ONE_ENEMY, ST_BLIND),
-    ("QUAKE",   1, 3, 20, EL_NONE,  TG_ALL_ENEMY, ST_POISON),
-    ("HUSH",    1, 4,  0, EL_NONE,  TG_ONE_ENEMY, ST_SILENCE),
-    ("HASTE",   1, 4,  0, EL_NONE,  TG_ONE_ALLY, 0),
-    ("PLASMA",  1, 5, 56, EL_FIRE,  TG_ONE_ENEMY, 0),
-    ("RIME",    1, 5, 30, EL_ICE,   TG_ALL_ENEMY, 0),
-    ("GRAVITY", 1, 6, 60, EL_VOID,  TG_ONE_ENEMY, ST_STUN),
-    ("BARRIER", 1, 6,  0, EL_NONE,  TG_ALL_ALLY, 0),
-    ("NOVA",    1, 7, 50, EL_FIRE,  TG_ALL_ENEMY, ST_BLIND),
-    ("VOID",    1, 7, 96, EL_VOID,  TG_ONE_ENEMY, ST_SILENCE),
-    ("SHATTER", 1, 8, 80, EL_ICE,   TG_ALL_ENEMY, ST_BLIND),
-    ("DOOM",    1, 8, 110, EL_VOID, TG_ONE_ENEMY, ST_SILENCE),
-    ("MEND",    2, 1, 30, EL_NONE,  TG_ONE_ALLY, 0),
-    ("CLEANSE", 2, 1,  0, EL_NONE,  TG_ONE_ALLY, ST_POISON),
-    ("GUARD+",  2, 2,  0, EL_NONE,  TG_ONE_ALLY, 0),
-    ("ROUSE",   2, 2,  0, EL_NONE,  TG_ONE_ALLY, ST_STUN | ST_BLIND),
-    ("MEND-2",  2, 3, 90, EL_NONE,  TG_ONE_ALLY, 0),
-    ("ANTIDOTE",2, 3,  0, EL_NONE,  TG_ALL_ALLY, ST_POISON | ST_BLIND),
-    ("SHIELD",  2, 4,  0, EL_NONE,  TG_ONE_ALLY, 0),
-    ("FOCUS",   2, 4,  0, EL_NONE,  TG_SELF, 0),
-    ("MEND-3",  2, 5, 200, EL_NONE, TG_ONE_ALLY, 0),
-    ("REVIVE",  2, 5,  0, EL_NONE,  TG_ONE_ALLY, 0),
-    ("PURGE",   2, 6,  0, EL_NONE,  TG_ALL_ALLY, ST_ALL),
-    ("RESIST",  2, 6,  0, EL_NONE,  TG_ALL_ALLY, 0),
-    ("MEND-ALL",2, 7, 160, EL_NONE, TG_ALL_ALLY, 0),
-    ("RENEW",   2, 7, 400, EL_NONE, TG_ONE_ALLY, 0),
-    ("WARD",    2, 8,  0, EL_NONE,  TG_ALL_ALLY, 0),
-    ("LAZARUS", 2, 8,  0, EL_NONE,  TG_ONE_ALLY, ST_ALL),
+    ("SPARK",   1, 1, 14, EL_SHOCK, TG_ONE_ENEMY, 0, 0),
+    ("CHILL",   1, 1, 12, EL_ICE,   TG_ONE_ENEMY, ST_STUN, 0),
+    ("JOLT",    1, 2, 16, EL_SHOCK, TG_ALL_ENEMY, ST_BLIND, 0),
+    ("SCAN",    1, 2,  0, EL_NONE,  TG_ONE_ENEMY, 0, 0),
+    ("FLARE",   1, 3, 34, EL_FIRE,  TG_ONE_ENEMY, ST_BLIND, 0),
+    ("QUAKE",   1, 3, 20, EL_NONE,  TG_ALL_ENEMY, ST_POISON, 0),
+    ("HUSH",    1, 4,  0, EL_NONE,  TG_ONE_ENEMY, ST_SILENCE, 0),
+    ("HASTE",   1, 4,  0, EL_NONE,  TG_ONE_ALLY, 0, 0),
+    ("PLASMA",  1, 5, 56, EL_FIRE,  TG_ONE_ENEMY, 0, 0),
+    ("RIME",    1, 5, 30, EL_ICE,   TG_ALL_ENEMY, 0, 0),
+    ("GRAVITY", 1, 6, 60, EL_VOID,  TG_ONE_ENEMY, ST_STUN, 0),
+    ("BARRIER", 1, 6,  0, EL_NONE,  TG_ALL_ALLY, 0, 0),
+    ("NOVA",    1, 7, 50, EL_FIRE,  TG_ALL_ENEMY, ST_BLIND, 0),
+    ("VOID",    1, 7, 96, EL_VOID,  TG_ONE_ENEMY, ST_SILENCE, 0),
+    ("SHATTER", 1, 8, 80, EL_ICE,   TG_ALL_ENEMY, ST_BLIND, 0),
+    ("DOOM",    1, 8, 110, EL_VOID, TG_ONE_ENEMY, ST_SILENCE, 0),
+    ("MEND",    2, 1, 30, EL_NONE,  TG_ONE_ALLY, 0, 0),
+    ("CLEANSE", 2, 1,  0, EL_NONE,  TG_ONE_ALLY, ST_POISON, 0),
+    ("GUARD+",  2, 2,  0, EL_NONE,  TG_ONE_ALLY, 0, 0),
+    ("ROUSE",   2, 2,  0, EL_NONE,  TG_ONE_ALLY, ST_STUN | ST_BLIND, 0),
+    ("MEND-2",  2, 3, 90, EL_NONE,  TG_ONE_ALLY, 0, 0),
+    ("ANTIDOTE",2, 3,  0, EL_NONE,  TG_ALL_ALLY, ST_POISON | ST_BLIND, 0),
+    ("SHIELD",  2, 4,  0, EL_NONE,  TG_ONE_ALLY, 0, 0),
+    ("FOCUS",   2, 4,  0, EL_NONE,  TG_SELF, 0, 0),
+    ("MEND-3",  2, 5, 200, EL_NONE, TG_ONE_ALLY, 0, 0),
+    ("REVIVE",  2, 5,  0, EL_NONE,  TG_ONE_ALLY, 0, 40),
+    ("PURGE",   2, 6,  0, EL_NONE,  TG_ALL_ALLY, ST_ALL, 0),
+    ("RESIST",  2, 6,  0, EL_NONE,  TG_ALL_ALLY, 0, 0),
+    ("MEND-ALL",2, 7, 160, EL_NONE, TG_ALL_ALLY, 0, 0),
+    ("RENEW",   2, 7, 400, EL_NONE, TG_ONE_ALLY, 0, 0),
+    ("WARD",    2, 8,  0, EL_NONE,  TG_ALL_ALLY, 0, 0),
+    ("LAZARUS", 2, 8,  0, EL_NONE,  TG_ONE_ALLY, ST_ALL, 255),
 ]
 
 TECH_ID = {t[0]: i for i, t in enumerate(TECHS)}
@@ -221,6 +226,66 @@ MONSTERS = [
 ]
 del T
 
+
+# --- the encounter curve ------------------------------------------------------
+# The hand-written HP and DEF above are a shape, not a scale: they were authored
+# against the party of a much earlier build and party ATK has outrun them since.
+# tools/balance.py simulated every formation at the level a player meets it and
+# found 55 of 62 random encounters ending in one or two rounds for under 5% of
+# the party's health -- a fight the player holds A through. Bosses were tuned
+# separately and are fine, so this scales the rank-and-file only.
+#
+# The multiplier ramps with tier because the gap does: at level 1-2 the early
+# monsters were already right (2-3 rounds, 5-16% HP lost) and only need leaving
+# alone, while the late ones need roughly tripling. DEF rises more gently --
+# doubling it would make weak attackers whiff rather than make fights longer.
+#
+# Re-run `python3 tools/balance.py` after touching any of this. The target is
+# 3-4 rounds and 10-25% HP for an ordinary encounter, which is about where FF1
+# sits, and no random encounter that can wipe a party at the level it appears.
+ENC_HP_GAIN = 3.0       # HP multiplier at the top of the rank-and-file
+ENC_ATK_GAIN = 1.5      # ...and for ATK, and for DEF
+ENC_DEF_GAIN = 0.5
+
+
+def _scaled(monsters):
+    ranks = [i for i, m in enumerate(monsters) if not m[12]]
+    out = []
+    for m in monsters:
+        if m[12]:                       # bosses keep their authored numbers
+            out.append(m)
+            continue
+        t = ranks.index(monsters.index(m)) / max(1, len(ranks) - 1)
+        out.append((m[0],
+                    round(m[1] * (1.0 + ENC_HP_GAIN * t)),
+                    round(m[2] * (1.0 + ENC_ATK_GAIN * t)),
+                    round(m[3] * (1.0 + ENC_DEF_GAIN * t))) + m[4:])
+    return out
+
+
+MONSTERS = _scaled(MONSTERS)
+
+
+def _filled(forms, monsters):
+    """Give the early formations one body per party member.
+
+    A pair of monsters against four characters cannot survive a round however
+    much HP it has -- four attacks land, two things die -- so every early
+    encounter read as trivial no matter how the numbers were scaled. Raising
+    the count is the fix that makes the fight last without making any single
+    monster spongey. Late formations are left alone: their monsters are big
+    enough that two is already a fight, and the arena holds four at most.
+    """
+    mid = {m[0]: i for i, m in enumerate(monsters)}
+    out = []
+    for (t0, c0, t1, c1, fl) in forms:
+        total = c0 + (c1 if t1 else 0)
+        if not fl & 1 and total < 3 and mid[t0] < 15:
+            c0 += 3 - total
+        out.append((t0, c0, t1, c1, fl))
+    return out
+
+
 MONSTER_ID = {m[0]: i for i, m in enumerate(MONSTERS)}
 
 # --- formations: (type0, count0, type1, count1, flags) -----------------------
@@ -270,24 +335,32 @@ FORMATIONS = [
     ("ARCHON PRIME", 1, None, 0, 1),
 ]
 
+FORMATIONS = _filled(FORMATIONS, MONSTERS)
+
 # --- encounter zones: 8 formation indices each (rolled uniformly) ------------
 ZONES = [
-    [0, 1, 2, 3, 4, 5, 2, 0],        # 0 central plains
-    [6, 7, 8, 9, 10, 6, 8, 7],       # 1 ashen verge
-    [11, 12, 13, 10, 11, 13, 12, 9], # 2 the glass
-    [20, 21, 22, 23, 20, 22, 21, 24],# 3 screaming reach
-    [14, 15, 16, 17, 15, 17, 14, 16],# 4 the fen
-    [11, 12, 18, 19, 12, 18, 11, 19],# 5 hollow waste
-    [25, 26, 27, 28, 26, 28, 25, 27],# 6 deep waste
-    [8, 9, 10, 11, 12, 13, 10, 8],   # 7 north coast
-    [16, 17, 14, 15, 19, 16, 17, 15],# 8 drowned shelf
+    # Encounter rosters, authored against the level the player actually reaches
+    # each zone at (tools/balance.py prints it). They used to be grouped by
+    # theme alone, which put the same tier-3 monsters in a level-4 zone and a
+    # level-8 one and left 55 of 62 formations resolving in one or two rounds.
+    # A zone's formations now cluster around its own tier, and the late zones
+    # split the top of the roster between them rather than all sharing it.
+    [0, 1, 0, 1, 3, 2, 5, 4],          # 0  central plains      lvl 1
+    [4, 7, 6, 6, 9, 9, 8, 10],         # 1  ashen verge         lvl 4
+    [10, 11, 12, 13, 12, 14, 14, 15],  # 2  the glass           lvl 8
+    [24, 25, 29, 26, 26, 27, 27, 28],  # 3  screaming reach     lvl 18
+    [16, 17, 17, 18, 18, 20, 21, 23],  # 4  the fen             lvl 12
+    [11, 12, 14, 14, 15, 15, 19, 18],  # 5  hollow waste        lvl 9
+    [26, 27, 28, 28, 30, 29, 25, 32],  # 6  deep waste          lvl 22
+    [9, 8, 8, 10, 10, 11, 12, 13],     # 7  north coast         lvl 5
+    [17, 20, 21, 21, 23, 23, 22, 31],  # 8  drowned shelf       lvl 14
     # dungeon zones
-    [0, 2, 4, 6, 7, 5, 3, 1],        # 9  Cinder
-    [12, 13, 14, 15, 13, 16, 12, 14],# 10 Tide
-    [20, 21, 22, 23, 24, 20, 22, 21],# 11 Storm
-    [25, 26, 27, 28, 29, 25, 27, 26],# 12 Hollow
-    [30, 31, 32, 33, 30, 32, 31, 33],# 13 Erebus
-    [18, 19, 20, 21, 22, 19, 18, 20],# 14 Relay / Ossuary
+    [0, 1, 3, 2, 2, 5, 5, 4],          # 9  Cinder              lvl 2
+    [8, 10, 10, 11, 11, 12, 13, 14],   # 10 Tide                lvl 6
+    [14, 15, 19, 19, 16, 16, 17, 18],  # 11 Storm               lvl 10
+    [23, 22, 31, 24, 24, 25, 25, 29],  # 12 Hollow              lvl 16
+    [28, 30, 32, 33, 30, 32, 33, 27],  # 13 Erebus              lvl 24
+    [24, 25, 29, 26, 26, 27, 22, 31],  # 14 Relay / Ossuary     lvl 20
 ]
 
 # --- shops: list of item names -----------------------------------------------

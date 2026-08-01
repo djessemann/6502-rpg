@@ -2,3 +2,6 @@
 *.o
 *.nes
 *.dbg
+
+# Agent worktrees and local tool state
+.claude/

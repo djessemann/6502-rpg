@@ -14,7 +14,8 @@ sat behind it.
 Both are now driven off btl_dirty: a kill or a hit sets the slot's bit and
 ArenaTick repaints that slot from the live state on a later frame.  This test
 counts non-blank tiles in the arena rows over a whole fight and asserts the
-count both dips-and-recovers (a hit flash) and steps down for good (a kill).
+arena both ends up empty (every corpse was erased) and dips-and-recovers at
+least once along the way (a hit that did not kill flashed its target).
 
 It has to use pyntendo's pure-Python core: the fast core renders frames but
 exposes no VRAM, and "is that enemy still drawn" is a nametable question.  That
@@ -148,23 +149,17 @@ def runs(counts):
     return out
 
 
-def kills(counts):
-    """Steps down that are never taken back -- an enemy leaving for good."""
-    n, lowest = 0, counts[0]
-    for v in counts:
-        if v < lowest:
-            n += 1
-            lowest = v
-    return n
-
-
 def flashes(counts):
-    """Dips that recover: the arena lost tiles and got them back."""
-    n = 0
-    for i in range(1, len(counts) - 1):
-        if counts[i] < counts[i - 1] and counts[i + 1] > counts[i]:
-            n += 1
-    return n
+    """Runs where the arena lost tiles and then got them back.
+
+    Counted over runs, not samples. A flash is BLINK_FRAMES long and this
+    samples every other frame, so it always shows as three or four samples at
+    the lower count with a higher one on either side -- a first version of this
+    looked for a one-sample dip and scored a textbook flash as zero.
+    """
+    rs = runs(counts)
+    return sum(1 for i in range(1, len(rs) - 1)
+               if rs[i][0] < rs[i - 1][0] and rs[i + 1][0] > rs[i][0])
 
 
 def measure(rom, label):
@@ -181,12 +176,12 @@ print("the real ROM")
 c = measure(GAME / "threnos.nes", "arena tiles")
 if c is None:
     print("no encounter; cannot measure"); sys.exit(1)
-ok_kill = check(kills(c) >= 1,
-                f"the arena empties as enemies die ({kills(c)} step-downs, "
-                f"ends at {c[-1]})")
-ok_flash = check(flashes(c) >= 1,
-                 f"and a hit that does not kill flashes the target "
-                 f"({flashes(c)} dip-and-recover)")
+check(c[0] > 0 and c[-1] == 0,
+      f"the arena starts full and is empty by the end of the fight "
+      f"({c[0]} -> {c[-1]} tiles)")
+check(flashes(c) >= 1,
+      f"and a hit that does not kill flashes the target "
+      f"({flashes(c)} dip-and-recover)")
 
 print("\nthe control (TEST_STATIC_ARENA stops anything marking a slot)")
 ctl = build(GAME / "test" / "threnos_static_arena.nes",
@@ -195,8 +190,8 @@ cc = measure(ctl, "arena tiles")
 if cc is None:
     check(False, "the control reached a battle")
 else:
-    check(kills(cc) == 0 and flashes(cc) == 0,
-          f"the control's arena never changes ({kills(cc)} step-downs, "
+    check(cc[-1] != 0 and flashes(cc) == 0,
+          f"the control's arena never changes ({cc[0]} -> {cc[-1]} tiles, "
           f"{flashes(cc)} flashes) - so the checks above mean something")
 
 print()

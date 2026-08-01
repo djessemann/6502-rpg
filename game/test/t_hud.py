@@ -14,11 +14,15 @@ nametable, reads b_hp straight out of the cartridge's battery RAM, and tracks
 the longest stretch of frames any row spent disagreeing.
 
 Some lag is by design -- one row per frame, then a frame for NMI to flush it
--- so this asserts a bound, not equality.
+-- so it asserts a bound on that stretch rather than equality, and separately
+that the fight ends with every row reading true.
 
-Control: -D TEST_HUD_FROZEN makes HudTick return immediately.  Its rows then
-freeze at whatever they said when the arena was painted, and the stretch runs
-to the length of the fight.
+Control: -D TEST_HUD_FROZEN makes HudTick return immediately, so the rows
+freeze at whatever they said when the arena was painted.  Note that it is the
+end state and not the stretch length that separates the two: a fight is short
+and the damage can land late in it, so the frozen build's stale stretch had
+only reached 18 frames when the fight ended -- inside the bound above, while
+its HUD was plainly showing a member at full HP who had been hit.
 """
 import pathlib
 import re
@@ -149,35 +153,37 @@ def measure(rom, label, limit=140):
     if nes is None:
         print(f"  ({label}: no encounter)")
         return None
-    worst, run, samples, seen_damage = 0, 0, 0, False
-    step = 2
+    worst, run, samples, step = 0, 0, 0, 2
+    first, shown, real, bad = None, [], [], False
     while samples < limit:
         T.run_frames(nes, t, step, keys=[(t.frame, A)])
         if not in_battle(nes):
             break
         samples += 1
         shown, real = hud_hp(nes), ram_hp(nes)
-        n = nes.cart.ram[PARTY_N - 0x6000]
-        if any(r != real[0] for r in real[:n]) or real[0] == 0:
-            seen_damage = True          # the party's HP has moved at all
-        bad = any(shown[i] != real[i] for i in range(min(n, 4)))
+        n = min(nes.cart.ram[PARTY_N - 0x6000], 4)
+        if first is None:
+            first = list(real)
+        bad = any(shown[i] != real[i] for i in range(n))
         run = run + step if bad else 0
         worst = max(worst, run)
+    damaged = first is not None and any(real[i] != first[i] for i in range(4))
     print(f"  {label}: {samples} samples, worst stale run {worst} frames, "
-          f"last row/RAM = {hud_hp(nes)} / {ram_hp(nes)}")
-    return worst, seen_damage
+          f"HUD/RAM at the end = {shown} / {real}")
+    return worst, damaged, not bad
 
 
 print("the real ROM")
 got = measure(GAME / "threnos.nes", "HUD vs RAM")
 if got is None:
     print("no encounter; cannot measure"); sys.exit(1)
-worst, damaged = got
-check(damaged, "the party actually took damage in this fight "
+worst, damaged, ended_agreeing = got
+check(damaged, "the party's HP actually moved in this fight "
                 "(otherwise nothing was being tested)")
 check(worst <= STALE_FRAMES,
       f"no HUD row disagreed with RAM for more than {STALE_FRAMES} frames "
       f"(worst {worst})")
+check(ended_agreeing, "and the fight ends with every row reading true")
 
 print("\nthe control (TEST_HUD_FROZEN stops HudTick)")
 ctl = build(GAME / "test" / "threnos_hud_frozen.nes",
@@ -186,9 +192,14 @@ cgot = measure(ctl, "HUD vs RAM")
 if cgot is None:
     check(False, "the control reached a battle")
 else:
-    check(cgot[0] > STALE_FRAMES,
-          f"the control's HUD does go stale and stay stale "
-          f"({cgot[0]} frames) - so the bound above means something")
+    # The end state, not the stale-run length: a fight is only a minute long
+    # and the damage can land late, so the control's counter had only reached
+    # 18 frames when the fight ended -- under the bound above, while its HUD
+    # was plainly wrong. Whether the number on screen is a lie is the thing
+    # the player sees, and it is binary.
+    check(not cgot[2],
+          "the control's HUD is still lying when the fight ends "
+          "- so the checks above mean something")
 
 print()
 if FAIL:

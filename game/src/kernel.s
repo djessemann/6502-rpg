@@ -236,9 +236,18 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     ldy #0
     lda (vram_ptr),y
     beq @drained
-    ldx vram_left
-    beq @done               ; budget spent: the rest goes out next frame
     sta vram_mode
+    ldy #3                  ; how many PPUDATA writes this packet costs, read
+    lda (vram_ptr),y        ; before committing to it
+    sta vram_cnt
+    cmp vram_left
+    beq @room
+    bcc @room
+    lda vram_left           ; it does not fit in what is left of the budget
+    cmp #VBUF_BUDGET
+    bne @done               ; something already went out: this waits a frame
+@room:                      ; nothing has yet, so send it or it never goes
+    lda vram_mode
     cmp #2
     beq @col
     lda ppu_ctrl
@@ -250,16 +259,13 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 @setctrl:
     sta PPUCTRL
     bit PPUSTATUS
-    iny
+    ldy #1
     lda (vram_ptr),y
     sta PPUADDR
     iny
     lda (vram_ptr),y
     sta PPUADDR
-    iny
-    lda (vram_ptr),y
-    sta vram_cnt            ; count
-    iny
+    ldy #4                  ; the data starts after the four header bytes
     ldx vram_cnt
     lda vram_mode
     cmp #3
@@ -282,13 +288,14 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     clc
     adc vram_ptr
     sta vram_ptr
-    lda vram_left           ; charge the PPUDATA writes, floor at zero
+    lda vram_left           ; charge the writes, floor at zero
     sec
     sbc vram_cnt
     bcs :+
     lda #0
 :   sta vram_left
     jmp @next
+
 @drained:
 @done:
     lda vram_ptr            ; where the next NMI picks up

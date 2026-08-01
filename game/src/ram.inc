@@ -183,7 +183,16 @@ sel_max        = $6CF9
 sel_top        = $6CFA
 lvl_i          = $6CFB
 tmp_wide       = $6CFC
+btl_blink      = $6CFD      ; enemy slot flashed out by a hit ($FF = none)
+btl_blinkt     = $6CFE      ; frames until it is painted back
+btl_dirty      = $6CFF      ; bitmask of enemy slots whose tiles are out of date
 tech_rec       = $6D70      ; 6: the tech record being applied
+; What each HUD row is currently showing: hp lo/hi, hpmax lo/hi, tp, status.
+; HudTick compares the live stats against this every frame and redraws any row
+; that has drifted, so the party's HP is never stale no matter which of the
+; two dozen places in this file moved it.
+hud_shadow     = $6D76      ; 24: 6 bytes per party member
+hud_live       = $6D8E      ; 6: the same six read fresh, for the compare
 
 ; Shop / menu scratch
 shop_list      = $6D00      ; 16 item ids

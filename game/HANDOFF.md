@@ -42,6 +42,7 @@ python3 test/t_item.py       # who a battle item is for, and revive
 python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
 python3 test/t_apu.py        # the ROM actually plays notes (slow: ~3 min)
 python3 test/t_arena.py      # the battle screen survives a scrolled camera
+python3 test/t_hits.py       # kills clear the arena, hits flash (slow: ~10 min)
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.
@@ -134,7 +135,7 @@ Zero page is allocated to `$E1`; `battle.s` also claims `$F0-$F5` locally.
 5. **Scratch collisions are the dominant bug class in this codebase.**
    `BuildRowStrip` and `AttrRowCore` both own `tmpd`; `AttrRowForce`,
    `DecodeRow` and `PutNumber` all clobber X; `StoryFlagSet` ends in `TAX`;
-   `EraseEnemy` clobbers `loop_i`. Loops that call them must count in memory
+   `HudLine` goes through `ptr`. Loops that call them must count in memory
    (`box_row_i`/`box_cnt`, `loop_i`, `hit_i`, `ti_flush`) and reload X from a
    variable afterwards. `SetPrgData`, `SetPrgCode` and `Random` were made
    register-safe *because* callers assumed it — keep them so.
@@ -164,7 +165,26 @@ Zero page is allocated to `$E1`; `battle.s` also claims `$F0-$F5` locally.
    and the main thread only rewinds it once NMI has emptied it, so a producer
    that queues six rows at once no longer spills PPU writes into active
    rendering — it just takes three frames to appear.
-11. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
+11. **What is on screen is derived from state, never pushed to it.** The
+   battle arena and the party HUD both work this way, and both were rewritten
+   into it after the same class of bug. `EraseEnemy` used to work out an
+   enemy's screen position itself instead of sharing `EnemySlotPos` with the
+   painter; when the layout table grew a row per group size only the painter
+   was updated, so a corpse was blanked at coordinates nothing had been drawn
+   at and stayed on screen for the rest of the fight. The HUD was refreshed one
+   row per message, so an attack that hit the whole party updated one member's
+   HP and left three reading stale numbers. Now a kill or a hit only sets a bit
+   in `btl_dirty`, and `ArenaTick` repaints that slot from `b_alive`/`btl_blink`
+   a frame later; `HudTick` compares each row's live stats against `hud_shadow`
+   and redraws whatever drifted. Neither can be left showing the wrong thing,
+   and no future edit to the two dozen places that move a stat has to remember
+   to announce it.
+12. **A refused `VBufAlloc` must not be recorded as drawn.** The queue fills,
+   and a producer that shrugs off the refusal loses that row permanently — half
+   an erased corpse, a HUD line frozen at the wrong HP. `WriteRowSegs` returns
+   carry set when it could not queue the whole row; `EraseEnemy`/`RedrawEnemy`
+   do the same; every caller leaves its dirty bit set and comes back next frame.
+13. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
    rest.** The overworld had 14 warps against a cap of 11 and lost the
    Ossuary, the Causeway and Erebus — the endgame dungeon had no entrance at
    all, and nothing said so. `MAX_ENT` is 16 now and `check_world.py` asserts

@@ -470,9 +470,14 @@ ST_KEEP = ST_POISON|ST_DOWN
     dey
     bne @clr
 
+    lda #$FF
+    sta btl_blink
+    lda #0
+    sta btl_dirty           ; the direct draw below leaves every slot current
     jsr DrawEnemies
     jsr DrawWindowDirect
     jsr DrawHudDirect
+    jsr HudShadowSync       ; the rows are current as of right now
     jsr ScreenOn
     rts
 .endproc
@@ -500,22 +505,23 @@ ST_KEEP = ST_POISON|ST_DOWN
     rts
 .endproc
 
-; X = enemy slot.
-.proc DrawOneEnemy
+; X = enemy slot -> tmpa/tmpb = its top-left tile, tmpd = its size in tiles.
+; Both the painter and the eraser go through here: they used to each work the
+; position out themselves, and when the layout table grew a row per group size
+; only the painter was updated -- so a dead enemy was blanked at coordinates
+; nothing was ever drawn at, and stayed on screen for the rest of the fight.
+.proc EnemySlotPos
+    stx tmp7
     lda btl_slot_type,x
-    sta tmpc                ; type (0/1)
     beq :+
     lda mon_rec2+15
     jmp @size
 :   lda mon_rec+15
 @size:
     sta tmpd                ; size in tiles (4/6/8)
-
-    ; screen position: the row of the table for this many enemies, then the slot
-    stx tmp7
-    lda btl_nenemy
-    sec
-    sbc #1
+    lda btl_nenemy          ; the table has a row per group size, so two or
+    sec                     ; three enemies are centred rather than laid out
+    sbc #1                  ; for four and left hanging to the left
     asl a
     asl a
     clc
@@ -525,11 +531,9 @@ ST_KEEP = ST_POISON|ST_DOWN
     sta tmpa
     lda enemy_y,y
     sta tmpb
-    ldx tmp7
-    ; large monsters are pulled left/up so they stay on screen
-    lda tmpd
+    lda tmpd                ; large monsters are pulled up and left to fit
     cmp #4
-    beq @pos
+    beq @done
     lda tmpa
     sec
     sbc #2
@@ -542,7 +546,16 @@ ST_KEEP = ST_POISON|ST_DOWN
     bpl :+
     lda #0
 :   sta tmpb
-@pos:
+@done:
+    ldx tmp7
+    rts
+.endproc
+
+; X = enemy slot.
+.proc DrawOneEnemy
+    jsr EnemySlotPos
+    lda btl_slot_type,x
+    sta tmpc                ; type (0/1)
     ; base tile index: $80 for type 0, $C0 for type 1
     lda tmpc
     beq :+
@@ -1051,7 +1064,11 @@ HUD_ROW = 25
 .proc BattleTick
     lda btl_phase
     cmp #BP_DONE
-    bcs @done
+    bcs @done               ; the fight is over and the field owns the screen
+    jsr BlinkTick           ; again: these two must not queue rows over it
+    jsr ArenaTick
+    jsr HudTick
+    lda btl_phase
     asl a
     tax
     lda phase_tab+1,x
@@ -2297,7 +2314,7 @@ HUD_ROW = 25
 @alive:
     lda b_hp,y
     ora b_hp+8,y
-    bne @done
+    bne @hurt               ; still standing: flash it so the hit is visible
     lda #0
     sta b_alive,y
     cpy #4
@@ -2307,47 +2324,81 @@ HUD_ROW = 25
     sta b_status,y
     jmp @done
 @enemydead:
-    jsr EraseEnemy
-@done:
-    rts
-.endproc
-
-; Blank the tiles of the dead enemy in slot (btl_target - 4).
-.proc EraseEnemy
     tya
     sec
     sbc #4
     tax
-    stx loop_i
-    lda btl_slot_type,x
-    beq :+
-    lda mon_rec2+15
-    jmp :++
-:   lda mon_rec+15
-:   sta tmpd
-    ldx loop_i
-    lda enemy_x,x
-    sta tmpa
-    lda enemy_y,x
-    sta tmpb
-    lda tmpd
-    cmp #4
-    beq @go
-    lda tmpa
-    sec
-    sbc #2
-    bpl :+
-    lda #0
-:   sta tmpa
-    lda tmpb
-    sec
-    sbc #2
-    bpl :+
-    lda #0
-:   sta tmpb
-@go:
+    jsr MarkSlot            ; ArenaTick sees b_alive = 0 and blanks it
+@done:
+    rts
+
+@hurt:
+    jmp BlinkTarget
+.endproc
+
+; --- arena repaint -----------------------------------------------------------
+; Nothing paints an enemy inline. A kill or a hit only sets the slot's bit in
+; btl_dirty; ArenaTick, called every frame, repaints at most one slot from the
+; live state -- dead or flashed out means blank, anything else means the
+; monster. State drives the tiles, so a slot can never be left showing the
+; wrong thing, only showing it a frame late.
+;
+; The indirection exists because VBufAlloc refuses while the queue is full.
+; Painting inline, a refusal silently dropped one row of an eight-row monster
+; and left half a corpse on screen for the rest of the fight; here the bit
+; stays set and the whole slot is simply painted again next frame.
+
+; X = enemy slot.
+.proc MarkSlot
+.ifdef TEST_STATIC_ARENA
+    rts                     ; t_hits.py's control: nothing is ever repainted,
+.endif                      ; which is the arena the bug report described
+    lda bitmask,x
+    ora btl_dirty
+    sta btl_dirty
+    rts
+.endproc
+
+.proc ArenaTick
+    ldx #0
+@find:
+    lda bitmask,x
+    and btl_dirty
+    bne @paint
+    inx
+    cpx #4
+    bcc @find
+    rts
+@paint:
+    txa
+    pha                     ; EraseEnemy/RedrawEnemy do not promise to keep X
+    lda b_alive+4,x
+    beq @blank
+    txa
+    cmp btl_blink           ; btl_blink is $FF when nothing is flashed out
+    beq @blank
+    jsr RedrawEnemy
+    jmp @sink
+@blank:
+    jsr EraseEnemy
+@sink:
+    pla
+    tax
+    bcs @done               ; a row did not fit: leave the bit set for next frame
+    lda bitmask,x
+    eor #$FF
+    and btl_dirty
+    sta btl_dirty
+@done:
+    rts
+.endproc
+
+; X = enemy slot. Blanks its tiles. Carry set if any row could not be queued.
+.proc EraseEnemy
+    jsr EnemySlotPos
     lda #0
     sta sub_i
+    sta sub_j               ; rows the queue had no room for
 @row:
     lda tmpb
     clc
@@ -2374,8 +2425,10 @@ HUD_ROW = 25
     lda tmpd
     sta vb_cnt
     jsr VBufAlloc
-    bcs @next
-    ldy #0
+    bcc :+
+    inc sub_j               ; the queue was full: this row is still to do
+    jmp @next
+:   ldy #0
     lda #0
     sta (vb_dat),y
 @next:
@@ -2383,6 +2436,126 @@ HUD_ROW = 25
     lda sub_i
     cmp tmpd
     bcc @row
+    lda sub_j               ; carry = "come back for this slot next frame"
+    beq @ok
+    sec
+    rts
+@ok:
+    clc
+    rts
+.endproc
+
+; X = enemy slot: repaint its tiles through VBUF, so it is safe with rendering
+; on. DrawOneEnemy writes PPUDATA directly and may only be used while the
+; screen is off.
+.proc RedrawEnemy
+    jsr EnemySlotPos
+    lda btl_slot_type,x
+    beq :+
+    lda #$C0
+    jmp :++
+:   lda #$80
+:   sta loop_j              ; running tile index
+    lda #0
+    sta sub_i
+    sta sub_j               ; rows the queue had no room for
+@row:
+    lda tmpb
+    clc
+    adc sub_i
+    sta tmp0
+    lsr a
+    lsr a
+    lsr a
+    clc
+    adc #$20
+    sta vb_hi
+    lda tmp0
+    and #7
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc tmpa
+    sta vb_lo
+    lda #1
+    sta vb_mode
+    lda tmpd
+    sta vb_cnt
+    jsr VBufAlloc
+    bcs @full
+    ldy #0
+@col:
+    lda loop_j
+    sta (vb_dat),y
+    inc loop_j
+    iny
+    cpy tmpd
+    bcc @col
+    jmp @adv
+@full:                      ; queue full: keep the tile index aligned anyway
+    inc sub_j
+    lda loop_j
+    clc
+    adc tmpd
+    sta loop_j
+@adv:
+    inc sub_i
+    lda sub_i
+    cmp tmpd
+    bcc @row
+    lda sub_j               ; carry = "come back for this slot next frame"
+    beq @ok
+    sec
+    rts
+@ok:
+    clc
+    rts
+.endproc
+
+; A hit that does not kill blanks the target for a few frames and paints it
+; back. Without it the arena never moves: the only sign an attack landed was a
+; line of text, so a fight read as a menu with a story attached.
+BLINK_FRAMES = 8
+
+.proc BlinkTarget
+    lda btl_target
+    sec
+    sbc #4
+    cmp #4
+    bcs @none               ; a party member: its HUD row is the feedback
+    ldx btl_blink           ; whoever is flashed out at the moment
+    cpx #4
+    bcs @set                ; $FF, so nobody is
+    sta btl_blink           ; the new target takes the flash over...
+    jsr MarkSlot            ; ...and the one it took it from is painted back,
+    jmp @timer              ; so mashing through a round still flashes each hit
+@set:
+    sta btl_blink
+@timer:
+    ldx btl_blink
+    lda #BLINK_FRAMES
+    sta btl_blinkt
+    jmp MarkSlot
+@none:
+    rts
+.endproc
+
+; Called every frame from BattleTick, ahead of ArenaTick: this decides what the
+; arena should look like, ArenaTick makes it so.
+.proc BlinkTick
+    lda btl_blink
+    cmp #$FF
+    beq @done
+    dec btl_blinkt
+    bne @done
+    tax                     ; A still holds the slot
+    lda #$FF
+    sta btl_blink
+    jmp MarkSlot            ; if it died meanwhile, ArenaTick leaves it blank
+@done:
     rts
 .endproc
 
@@ -3585,27 +3758,114 @@ HUD_ROW = 25
     bcc @done
     lda #BP_RESOLVE
     sta btl_phase
-    jsr DrawHudRows
 @done:
     rts
 .endproc
 
-; One HUD row per message - the row of whoever was just hit if that was a party
-; member, otherwise the next one round-robin. One row is the budget: the message
-; itself has already spent most of this frame's VBUF on its four interior lines.
-.proc DrawHudRows
-    lda btl_target
-    cmp #4
-    bcc :+
-    lda btl_round
-    and #3
-:   sta loop_i
+; --- HUD refresh -------------------------------------------------------------
+; The HUD used to be refreshed one row per message, picking the row of whoever
+; was hit last. An enemy tech that hit the whole party therefore updated one
+; member's HP and left the other three reading whatever they had before, often
+; for the rest of the round -- three quarters of the damage the player took was
+; invisible at the moment it happened.
+;
+; So it is not pushed from the ~two dozen places in this file that move a stat.
+; HudTick compares each row's live stats against what that row is showing and
+; redraws any that have drifted, one row per frame: the party's HP cannot go
+; stale, and no future edit has to remember to say so.
+HUD_SHADOW = 6              ; hp lo/hi, hpmax lo/hi, tp, status
+
+; X = party member -> ptr = its shadow bytes, and the live values in the six
+; bytes at hud_live.
+.proc HudSnapshot
+    lda b_hp,x
+    sta hud_live+0
+    lda b_hp+8,x
+    sta hud_live+1
+    lda b_hpmax,x
+    sta hud_live+2
+    lda b_hpmax+8,x
+    sta hud_live+3
+    lda b_status,x
+    sta hud_live+4
+    txa
+    asl a                   ; party records are 32 bytes apart
+    asl a
+    asl a
+    asl a
+    asl a
+    tay
+    lda party+c_tp,y
+    sta hud_live+5
+    txa                     ; ptr = hud_shadow + X*6
+    asl a
+    sta tmp0
+    asl a
+    clc
+    adc tmp0                ; X*2 + X*4
+    clc
+    adc #<hud_shadow
+    sta ptr
+    lda #>hud_shadow
+    adc #0
+    sta ptr+1
+    rts
+.endproc
+
+; Refresh at most one HUD row per frame. Called from BattleTick.
+.proc HudTick
+    ldx #0
+@scan:
+    cpx party_n
+    bcs @drawn
+    jsr HudSnapshot
+    ldy #HUD_SHADOW-1
+@cmp:
+    lda (ptr),y
+    cmp hud_live,y
+    bne @stale
+    dey
+    bpl @cmp
+    inx
+    cpx #4
+    bcc @scan
+@drawn:
+    rts
+@stale:
+    stx loop_i
     jsr HudLine
     lda #HUD_ROW
     clc
     adc loop_i
     jsr RowSegs
-    jmp WriteRowSegs
+    jsr WriteRowSegs
+    bcs @drawn              ; no room this frame: leave the shadow alone and
+    ldx loop_i              ; the compare above picks the row up again
+    jsr HudSnapshot         ; (HudLine went through ptr on its way to the name)
+    ldy #HUD_SHADOW-1
+:   lda hud_live,y
+    sta (ptr),y
+    dey
+    bpl :-
+    rts
+.endproc
+
+; The whole screen was just painted directly, so every row is current: take the
+; shadow from the live stats rather than letting HudTick spend four frames
+; redrawing rows that already read correctly.
+.proc HudShadowSync
+    ldx #0
+@one:
+    jsr HudSnapshot
+    ldy #HUD_SHADOW-1
+:   lda hud_live,y
+    sta (ptr),y
+    dey
+    bpl :-
+    inx
+    cpx #4
+    bcc @one
+    rts
 .endproc
 
 .proc BattleResult

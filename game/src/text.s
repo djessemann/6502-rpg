@@ -102,6 +102,9 @@ F_BR = TILE_FRAME + 8
 .endproc
 
 ; Write linebuf[0..31] to the row set up by RowSegs.
+; Carry clear if the whole row was queued, set if VBUF had no room for part of
+; it. A caller that is tracking what the screen shows must not record the row
+; as drawn on a set carry -- it has to ask again next frame.
 .proc WriteRowSegs
     lda seg_base
     ldx seg_col
@@ -111,7 +114,7 @@ F_BR = TILE_FRAME + 8
     lda seg_cnt
     sta vb_cnt
     jsr VBufAlloc
-    bcs @done
+    bcs @fail
     ldy #0
 @c1:
     lda linebuf,y
@@ -120,7 +123,7 @@ F_BR = TILE_FRAME + 8
     cpy seg_cnt
     bne @c1
     lda seg2_cnt
-    beq @done
+    beq @ok
     lda seg2_base
     ldx #0
     jsr SegAddr
@@ -129,7 +132,7 @@ F_BR = TILE_FRAME + 8
     lda seg2_cnt
     sta vb_cnt
     jsr VBufAlloc
-    bcs @done
+    bcs @fail
     ldy #0
     ldx seg_cnt
 @c2:
@@ -139,7 +142,11 @@ F_BR = TILE_FRAME + 8
     iny
     cpy seg2_cnt
     bne @c2
-@done:
+@ok:
+    clc
+    rts
+@fail:
+    sec
     rts
 .endproc
 

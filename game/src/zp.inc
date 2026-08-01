@@ -124,6 +124,12 @@ scratch       = $68     ; 8 bytes of general scratch ($68-$6F)
 ; $70-$74 belong to FlushVBuf and are touched by NOTHING else: the NMI runs
 ; between arbitrary main-thread instructions, so it may not borrow tmp0..tmp7.
 vram_mode     = $70     ; NMI-only: the packet mode being flushed
+; A shadow of the last value written to MMC3 $8000. Bank switching is two
+; writes -- select, then data -- and NMI switches PRG banks of its own every
+; frame, so an NMI landing between a main-thread pair would send that pair's
+; bank number to whichever register NMI had selected last. NMI restores this
+; on its way out, which puts the interrupted pair back on its own register.
+mmc_select    = $71
 vram_cnt      = $72
 ; NMI-only scratch: the main thread must never touch these.
 vram_left     = $E2     ; bytes of PPUDATA left in this frame's budget

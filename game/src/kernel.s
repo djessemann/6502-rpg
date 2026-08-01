@@ -162,6 +162,8 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     pha
     tya
     pha
+    lda mmc_select          ; whatever the main thread had selected; it may be
+    pha                     ; part way through a select/data pair right now
 
     ; OAM DMA first: it must happen early in vblank.
     lda #$00
@@ -193,6 +195,9 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     jsr SetPrgCode
 
     inc frame_count
+    pla                     ; put the main thread's bank register back before
+    sta mmc_select          ; it gets to the data half of its pair
+    sta MMC_SELECT
     pla
     tay
     pla
@@ -420,7 +425,8 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     sta cur_data_bank
     pha
     lda #SEL_PRG6
-    sta MMC_SELECT
+    sta mmc_select          ; shadow first: an NMI anywhere in this pair then
+    sta MMC_SELECT          ; restores the select we are part way through using
     pla
     sta MMC_DATA
     rts
@@ -431,7 +437,8 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     sta cur_code_bank
     pha
     lda #SEL_PRG7
-    sta MMC_SELECT
+    sta mmc_select          ; shadow first: an NMI anywhere in this pair then
+    sta MMC_SELECT          ; restores the select we are part way through using
     pla
     sta MMC_DATA
     rts
@@ -439,6 +446,7 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 
 ; X = SEL_CHRn select value, A = bank number.
 .proc SetChrBank
+    stx mmc_select
     stx MMC_SELECT
     sta MMC_DATA
     rts

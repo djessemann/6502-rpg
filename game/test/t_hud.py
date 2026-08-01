@@ -1,4 +1,4 @@
-"""The party HUD keeps up with the party's HP.
+"""The party HUD keeps up with the party's HP, and a hit on them registers.
 
 The HUD used to be refreshed one row per battle message, picking the row of
 whoever was hit last.  An enemy tech that hit the whole party therefore
@@ -17,7 +17,13 @@ Some lag is by design -- one row per frame, then a frame for NMI to flush it
 -- so it asserts a bound on that stretch rather than equality, and separately
 that the fight ends with every row reading true.
 
-Control: -D TEST_HUD_FROZEN makes HudTick return immediately, so the rows
+It also watches the backdrop.  The party have no body in the arena to light
+up the way a struck monster does -- they are four lines of a HUD -- so damage
+to them flashes $3F00 red for about two frames instead.  That is checked here
+because this is the test that already knows, frame by frame, when their HP
+moved.
+
+Controls: -D TEST_HUD_FROZEN makes HudTick return immediately, so the rows
 freeze at whatever they said when the arena was painted.  Note that it is the
 end state and not the stretch length that separates the two: a fight is short
 and the damage can land late in it, so the frozen build's stale stretch had
@@ -47,6 +53,8 @@ PARTY_N = 0x60D3
 # does one row a frame and NMI flushes a frame later, so four rows changing at
 # once take about ten frames to all land; this is that with room to spare.
 STALE_FRAMES = 30
+BACKDROP_BLACK = 0x0F
+BACKDROP_HIT = 0x16
 
 FAIL = []
 
@@ -122,6 +130,11 @@ def in_battle(nes):
     return nes.memory.ram[GAMESTATE] == GS_BATTLE
 
 
+def backdrop(nes):
+    """$3F00 out of the PPU's palette RAM."""
+    return nes.ppu.vram.palette_ram[0]
+
+
 def to_battle(rom, walk_steps=60):
     nes, t = T.build(rom)
     seq, f = [], 40
@@ -153,37 +166,55 @@ def measure(rom, label, limit=140):
     if nes is None:
         print(f"  ({label}: no encounter)")
         return None
-    worst, run, samples, step = 0, 0, 0, 2
+    worst, run, samples = 0, 0, 0
     first, shown, real, bad = None, [], [], False
+    prev, hits, flashed, stuck = None, 0, 0, 0
+    # One frame at a time here: a two-frame backdrop flash is invisible to a
+    # sampler that only looks every other frame.
     while samples < limit:
-        T.run_frames(nes, t, step, keys=[(t.frame, A)])
+        T.run_frames(nes, t, 1, keys=[(t.frame, A)] if samples % 5 == 0 else [])
         if not in_battle(nes):
             break
         samples += 1
         shown, real = hud_hp(nes), ram_hp(nes)
         n = min(nes.cart.ram[PARTY_N - 0x6000], 4)
         if first is None:
-            first = list(real)
+            first = prev = list(real)
+        if real != prev:
+            hits += 1
+        prev = list(real)
+        bd = backdrop(nes)
+        if bd == BACKDROP_HIT:
+            flashed += 1
+        elif bd != BACKDROP_BLACK:
+            stuck += 1              # neither black nor the flash: a bad write
         bad = any(shown[i] != real[i] for i in range(n))
-        run = run + step if bad else 0
+        run = run + 1 if bad else 0
         worst = max(worst, run)
     damaged = first is not None and any(real[i] != first[i] for i in range(4))
-    print(f"  {label}: {samples} samples, worst stale run {worst} frames, "
+    print(f"  {label}: {samples} frames, worst stale run {worst}, "
+          f"party hits {hits}, red frames {flashed}, odd backdrop {stuck}, "
           f"HUD/RAM at the end = {shown} / {real}")
-    return worst, damaged, not bad
+    return worst, damaged, not bad, hits, flashed, stuck
 
 
 print("the real ROM")
 got = measure(GAME / "threnos.nes", "HUD vs RAM")
 if got is None:
     print("no encounter; cannot measure"); sys.exit(1)
-worst, damaged, ended_agreeing = got
+worst, damaged, ended_agreeing, hits, flashed, stuck = got
 check(damaged, "the party's HP actually moved in this fight "
                 "(otherwise nothing was being tested)")
 check(worst <= STALE_FRAMES,
       f"no HUD row disagreed with RAM for more than {STALE_FRAMES} frames "
       f"(worst {worst})")
 check(ended_agreeing, "and the fight ends with every row reading true")
+check(hits > 0 and flashed > 0,
+      f"the backdrop flashes red when the party is hit "
+      f"({flashed} red frames over {hits} hits)")
+check(stuck == 0,
+      f"and it is only ever black or that red, never left on a stray colour "
+      f"({stuck} frames on something else)")
 
 print("\nthe control (TEST_HUD_FROZEN stops HudTick)")
 ctl = build(GAME / "test" / "threnos_hud_frozen.nes",
@@ -200,6 +231,17 @@ else:
     check(not cgot[2],
           "the control's HUD is still lying when the fight ends "
           "- so the checks above mean something")
+
+print("\nthe second control (TEST_NO_HITFLASH stops PartyHitFlash)")
+ctl2 = build(GAME / "test" / "threnos_no_hitflash.nes",
+             ["-D", "TEST_NO_HITFLASH=1"])
+c2 = measure(ctl2, "HUD vs RAM")
+if c2 is None:
+    check(False, "the second control reached a battle")
+else:
+    check(c2[3] > 0 and c2[4] == 0,
+          f"the control takes hits and the backdrop never moves "
+          f"({c2[4]} red frames over {c2[3]} hits)")
 
 print()
 if FAIL:

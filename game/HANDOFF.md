@@ -43,6 +43,7 @@ python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
 python3 test/t_apu.py        # the ROM actually plays notes (slow: ~3 min)
 python3 test/t_arena.py      # the battle screen survives a scrolled camera
 python3 test/t_hits.py       # kills clear the arena, hits flash (slow: ~10 min)
+python3 test/t_hud.py        # the HUD tracks party HP, hits flash the backdrop
 python3 test/t_hud.py        # the HUD keeps up with the party's HP (slow: ~10 min)
 ```
 
@@ -175,17 +176,28 @@ Zero page is allocated to `$E1`; `battle.s` also claims `$F0-$F5` locally.
    at and stayed on screen for the rest of the fight. The HUD was refreshed one
    row per message, so an attack that hit the whole party updated one member's
    HP and left three reading stale numbers. Now a kill or a hit only sets a bit
-   in `btl_dirty`, and `ArenaTick` repaints that slot from `b_alive`/`btl_blink`
+   in `btl_dirty`, and `ArenaTick` repaints that slot from `b_alive`/`btl_flash`
    a frame later; `HudTick` compares each row's live stats against `hud_shadow`
-   and redraws whatever drifted. Neither can be left showing the wrong thing,
+   and redraws whatever drifted. A hit only rewrites the one to four attribute
+   bytes over its target (sub-palette 2, white) -- blanking and repainting a
+   monster's tiles for every blow read as vanishing rather than reacting, and
+   left it half-drawn whenever the queue was too busy to take a row. Neither can be left showing the wrong thing,
    and no future edit to the two dozen places that move a stat has to remember
    to announce it.
-12. **A refused `VBufAlloc` must not be recorded as drawn.** The queue fills,
+12. **Bank switching is two writes, and NMI switches banks too.** MMC3 wants
+   a register select at `$8000` and then the bank at `$8001`, and the NMI maps
+   the sound driver's own PRG bank every single frame. An NMI landing between
+   a main-thread pair therefore sent that pair's bank number to whichever
+   register the NMI had selected last -- a CHR bank number into the code
+   window, or a data bank into a CHR register, which changes every monster on
+   screen at once. `mmc_select` shadows the last select written and NMI puts it
+   back on the way out, so the interrupted pair completes on its own register.
+13. **A refused `VBufAlloc` must not be recorded as drawn.** The queue fills,
    and a producer that shrugs off the refusal loses that row permanently — half
    an erased corpse, a HUD line frozen at the wrong HP. `WriteRowSegs` returns
    carry set when it could not queue the whole row; `EraseEnemy`/`RedrawEnemy`
    do the same; every caller leaves its dirty bit set and comes back next frame.
-13. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
+14. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
    rest.** The overworld had 14 warps against a cap of 11 and lost the
    Ossuary, the Causeway and Erebus — the endgame dungeon had no entrance at
    all, and nothing said so. `MAX_ENT` is 16 now and `check_world.py` asserts

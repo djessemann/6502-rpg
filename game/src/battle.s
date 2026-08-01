@@ -2593,6 +2593,9 @@ HIT_FRAMES = 3              ; one frame to put the colour up, one to take it
                             ; down, so about two frames of red
 
 .proc PartyHitFlash
+.ifdef TEST_NO_HITFLASH
+    rts                     ; t_hud.py's control: damage to the party draws
+.endif                      ; nothing at all, which is where this started
     lda #HIT_FRAMES
     sta btl_hitf
     rts
@@ -2602,13 +2605,6 @@ HIT_FRAMES = 3              ; one frame to put the colour up, one to take it
     lda btl_hitf
     beq @done
     dec btl_hitf
-    beq @off
-    lda #$16                ; red
-    jmp @put
-@off:
-    lda #$0F                ; and back to black
-@put:
-    sta tmp1
     lda #$3F                ; $3F00 is the universal backdrop
     sta vb_hi
     lda #$00
@@ -2616,10 +2612,16 @@ HIT_FRAMES = 3              ; one frame to put the colour up, one to take it
     lda #1
     sta vb_mode
     sta vb_cnt
-    jsr VBufAlloc
-    bcs @wait
+    jsr VBufAlloc           ; this uses tmp0-tmp2 as scratch, so the colour is
+    bcs @wait               ; worked out below it rather than stashed across it
     ldy #0
-    lda tmp1
+    lda btl_hitf
+    beq @off
+    lda #$16                ; red
+    sta (vb_dat),y
+    rts
+@off:
+    lda #$0F                ; and back to black
     sta (vb_dat),y
     rts
 @wait:

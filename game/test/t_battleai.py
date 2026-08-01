@@ -37,7 +37,7 @@ for _ch, _bits in font.GLYPHS.items():
             _m[_y, _x] = bool(_bits[_y] & (0x10 >> _x))
     TEMPLATES[_ch] = _m
 
-WINDOW_LINES = (21, 22, 23, 24)         # screen tile rows of the window interior
+from play import WINDOW_LINES           # read out of src/battle.s
 
 
 def read_row(frame, row):

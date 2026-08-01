@@ -41,6 +41,7 @@ python3 test/t_shop.py       # buying, selling, and a save terminal
 python3 test/t_item.py       # who a battle item is for, and revive
 python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
 python3 test/t_apu.py        # the ROM actually plays notes (slow: ~3 min)
+python3 test/t_arena.py      # the battle screen survives a scrolled camera
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.
@@ -149,7 +150,21 @@ Zero page is allocated to `$E1`; `battle.s` also claims `$F0-$F5` locally.
    whatever followed as if it were note data -- no music, a constant buzz, and
    the whole test suite green. `INX`/`INY`/`DEX`/`DEY` set N and Z from the
    register. Put an explicit `CMP` back in, or branch before you increment.
-9. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
+9. **A state that owns the whole screen owns the camera too.** `BattleEnter`
+   zeroes `cam_tx`/`scroll_x` so `RowSegs` addresses the arena as one unsplit
+   32-tile row. `StField` used to recompute the field camera *after*
+   `UpdateHero` had already started the battle, which put every later row write
+   at the field's column offset: the window came out torn in half, the HUD lost
+   the party names off the left edge, and every button press redrew more of the
+   same — which reads as flicker on hardware. Anything at `GS_BATTLE` or above
+   is off limits to `UpdateCamera`.
+10. **The NMI writes at most `VBUF_BUDGET` bytes of PPUDATA.** Vblank is ~2273
+   cycles and OAM DMA takes 513; the flush loop costs about 16 cycles a byte.
+   `FlushVBuf` drains the queue front to back across frames through `vbuf_rp`
+   and the main thread only rewinds it once NMI has emptied it, so a producer
+   that queues six rows at once no longer spills PPU writes into active
+   rendering — it just takes three frames to appear.
+11. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
    rest.** The overworld had 14 warps against a cap of 11 and lost the
    Ossuary, the Causeway and Erebus — the endgame dungeon had no entrance at
    all, and nothing said so. `MAX_ENT` is 16 now and `check_world.py` asserts

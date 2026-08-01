@@ -52,7 +52,7 @@ CMD_ITEM  = 2
 CMD_GUARD = 3
 CMD_RUN   = 4
 
-TEXT_ROW0 = 21
+TEXT_ROW0 = 20          ; = BOX_ROW + 1; see BOX_ROW below
 MSG_HOLD  = 40              ; frames a battle message stays up on its own
 
 ; --- monster record layout (MON_REC bytes, see tools/emit_data.py) -----------
@@ -511,11 +511,21 @@ ST_KEEP = ST_POISON|ST_DOWN
 @size:
     sta tmpd                ; size in tiles (4/6/8)
 
-    ; screen position from a table by slot and size
-    lda enemy_x,x
+    ; screen position: the row of the table for this many enemies, then the slot
+    stx tmp7
+    lda btl_nenemy
+    sec
+    sbc #1
+    asl a
+    asl a
+    clc
+    adc tmp7
+    tay
+    lda enemy_x,y
     sta tmpa
-    lda enemy_y,x
+    lda enemy_y,y
     sta tmpb
+    ldx tmp7
     ; large monsters are pulled left/up so they stay on screen
     lda tmpd
     cmp #4
@@ -662,7 +672,7 @@ ST_KEEP = ST_POISON|ST_DOWN
     sta loop_i
 @lp:
     jsr HudLine
-    lda #26
+    lda #HUD_ROW
     clc
     adc loop_i
     sta tmp0
@@ -701,7 +711,7 @@ ST_KEEP = ST_POISON|ST_DOWN
     sta loop_i
 @lp:
     jsr HudLine
-    lda #26
+    lda #HUD_ROW
     clc
     adc loop_i
     jsr RowSegs
@@ -834,8 +844,18 @@ ST_KEEP = ST_POISON|ST_DOWN
 .endproc
 
 .segment "BANK25"
-enemy_x:  .byte 3, 11, 19, 26
-enemy_y:  .byte 4, 8, 4, 9
+; Where each enemy stands, chosen by how many there are so the group is centred
+; rather than laid out for four and left hanging to the left when there are two
+; or three. Indexed (count-1)*4 + slot; the rows stagger so overlapping
+; silhouettes still read apart.
+enemy_x:  .byte 14,  0,  0,  0     ; 1
+          .byte  7, 20,  0,  0     ; 2
+          .byte  4, 13, 22,  0     ; 3
+          .byte  2, 10, 18, 26     ; 4
+enemy_y:  .byte  6,  0,  0,  0
+          .byte  5,  9,  0,  0
+          .byte  4,  9,  4,  0
+          .byte  4,  8,  4,  9
 ; POISON / STUN / BLIND / SILENCE, in ST_* bit order
 status_letters: .byte "PTBS"
 batt_pal:
@@ -856,7 +876,11 @@ F_BL = TILE_FRAME + 6
 F_B  = TILE_FRAME + 7
 F_BR = TILE_FRAME + 8
 
-BOX_ROW = 20
+; The window and the party HUD, moved up one row from where they were: the HUD
+; ran 26-29 and screen row 29 is overscan, so the fourth member's HP was off the
+; bottom of most televisions and off the bottom of the emulators too.
+BOX_ROW = 19
+HUD_ROW = 25
 
 .proc DrawWindowDirect
     lda #0
@@ -934,12 +958,15 @@ BOX_ROW = 20
     jmp @row
     :
 
-    ; window + HUD attributes: rows 20-29 all take sub-palette 3
+    ; window + HUD attributes: screen rows 16-29 all take sub-palette 3. It
+    ; starts at attribute row 4 rather than 5 because the window's top border
+    ; moved up to screen row 19, which lives in that quadrant; rows 16-18 above
+    ; it are blank, and tile $00 looks the same in every sub-palette.
     lda #$23
-    ldx #$E8                ; attribute rows 5-7 ($23C0 + 5*8)
+    ldx #$E0                ; attribute rows 4-7 ($23C0 + 4*8)
     jsr PpuAddr
     lda #%11111111
-    ldx #24
+    ldx #32
     jsr PpuFill
     rts
 .endproc
@@ -3574,7 +3601,7 @@ BOX_ROW = 20
     and #3
 :   sta loop_i
     jsr HudLine
-    lda #26
+    lda #HUD_ROW
     clc
     adc loop_i
     jsr RowSegs

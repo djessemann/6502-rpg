@@ -11,9 +11,36 @@ Detection is by frame, since we cannot read emulator RAM:
 Both detectors are self-checked by test/t_play.py against known frames.
 """
 import collections
+import pathlib
+import re
+
 import numpy as np
 
 from harness import Run, press, A, UP, DOWN, LEFT, RIGHT
+
+# --- where the battle screen puts things -------------------------------------
+# Read out of src/battle.s rather than written down in each test: moving the
+# window up one row (the fourth party member's HUD line was in overscan) broke
+# three tests at once because each had its own copy of these numbers.
+def _battle_rows():
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "src" / "battle.s").read_text()
+    def const(name, default):
+        m = re.search(rf"^{name}\s*=\s*(\d+)", src, re.M)
+        return int(m.group(1)) if m else default
+    box = const("BOX_ROW", 19)
+    hud = const("HUD_ROW", 25)
+    return box, const("TEXT_ROW0", box + 1), hud
+
+
+BOX_ROW, TEXT_ROW0, HUD_ROW = _battle_rows()
+# the four interior lines of the battle window, and the four party HUD lines
+WINDOW_LINES = tuple(TEXT_ROW0 + i for i in range(4))
+HUD_LINES = tuple(HUD_ROW + i for i in range(4))
+# interior line 0 is the "TURN: <name>" banner; the command grid is the two
+# lines under it
+CMD_ROWS = WINDOW_LINES[1:3]
+
 
 # The window frame is drawn in the UI palette's colour 1, NES $00.
 FRAME_RGB = (82, 82, 82)

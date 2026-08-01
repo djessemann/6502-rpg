@@ -303,10 +303,20 @@ MF_DUNGEON = $01                ; "inside": remember where we came in from
 ; --- GS_FIELD: walking -------------------------------------------------------
 .proc StField
     jsr UpdateHero
-    jsr UpdateCamera            ; ALWAYS: a trigger or encounter fired by the
-                                ; landing step leaves the camera one frame
-                                ; stale, and every window's geometry is
-                                ; computed from cam_tx/cam_ty
+    ; A trigger or a window opened by the landing step needs a fresh camera:
+    ; its geometry is computed from cam_tx/cam_ty, and leaving those a frame
+    ; stale drew the box where it could not be seen. But the states from
+    ; GS_BATTLE up own the whole screen -- BattleEnter has already zeroed the
+    ; camera and the scroll so that RowSegs addresses the arena as one
+    ; unsplit row -- and recomputing the field camera on top of that put every
+    ; later row write at the field's column offset. That is what tore the
+    ; battle window in half and left the HUD names off the side of the screen.
+    lda gamestate
+.ifndef TEST_CAMERA_CLOBBER     ; the control for test/t_arena.py: without this
+    cmp #GS_BATTLE              ; guard the field camera overwrites the arena's
+    bcs @leave
+.endif
+    jsr UpdateCamera
     lda gamestate               ; UpdateHero may have started a battle or a
     cmp #GS_FIELD               ; warp: the rest of this state must not run
     beq :+
@@ -328,6 +338,7 @@ MF_DUNGEON = $01                ; "inside": remember where we came in from
     beq @done
     jsr TalkOrAct
 @done:
+@leave:
     rts
 .endproc
 

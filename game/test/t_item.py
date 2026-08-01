@@ -20,12 +20,12 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(GAME / "tools"))
 
 from harness import Run, press, A, B, UP, DOWN, LEFT, RIGHT     # noqa: E402
-from play import arena_fraction, start_game                     # noqa: E402
+from play import (arena_fraction, start_game, WINDOW_LINES,      # noqa: E402
+                  CMD_ROWS, HUD_LINES, TEXT_ROW0)
 import glyphs                                                   # noqa: E402
 
 ROM = GAME / "test" / "threnos_item.nes"
-CMD_ROWS = (22, 23)
-LIST_ROWS = (21, 22, 23, 24)
+LIST_ROWS = WINDOW_LINES
 
 FAIL = []
 
@@ -83,7 +83,7 @@ def to_battle(r, limit=400):
     return False
 
 
-MSG_ROWS = (21, 22)
+MSG_ROWS = WINDOW_LINES[:2]
 
 
 def watch(r, until=None, limit=60):
@@ -123,8 +123,9 @@ def wait_for_cmd(r, limit=60):
     asserting against a list of GLASS TICKs.
     """
     for _ in range(limit):
-        if "FIGHT" in glyphs.line(r.frame, 22) and \
-                ">" in glyphs.line(r.frame, 22) + glyphs.line(r.frame, 23):
+        if "FIGHT" in glyphs.line(r.frame, CMD_ROWS[0]) and \
+                ">" in (glyphs.line(r.frame, CMD_ROWS[0])
+                        + glyphs.line(r.frame, CMD_ROWS[1])):
             return True
         r.tap(A, 2, 8)
     return False
@@ -133,8 +134,8 @@ def wait_for_cmd(r, limit=60):
 def open_items(r):
     """From the command menu: put the cursor on ITEM and open the pack."""
     for _ in range(4):
-        if ">" in glyphs.line(r.frame, 22) and \
-                glyphs.line(r.frame, 22).index(">") > 12:
+        if ">" in glyphs.line(r.frame, CMD_ROWS[0]) and \
+                glyphs.line(r.frame, CMD_ROWS[0]).index(">") > 12:
             break
         r.tap(RIGHT, 3, 20)
     r.tap(A, 3, 40)
@@ -148,8 +149,9 @@ if not to_battle(r):
 
 print("\nan item asks who it is for")
 open_items(r)
-check(glyphs.line(r.frame, 21).strip().endswith("MEDKIT"),
-      f"the pack opens on MEDKIT ({glyphs.line(r.frame, 21).strip()!r})")
+check(glyphs.line(r.frame, LIST_ROWS[0]).strip().endswith("MEDKIT"),
+      f"the pack opens on MEDKIT "
+      f"({glyphs.line(r.frame, LIST_ROWS[0]).strip()!r})")
 r.tap(A, 3, 40)
 rows = [glyphs.line(r.frame, i).strip() for i in LIST_ROWS]
 check(sum(1 for t in rows if t) >= 4,

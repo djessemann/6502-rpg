@@ -13,7 +13,7 @@
 .import SoundInit, SoundTick
 
 .export SetPrgData, SetPrgCode, SetChrBank, WaitFrame, ReadInput
-.export VBufReset, VBufAlloc, Random, Rand16, Mul8, Div8, Div16
+.export VBufReset, VBufRecycle, VBufAlloc, Random, Rand16, Mul8, Div8, Div16
 .export PpuAddr, PpuFill, ClearNametables, LoadPalette, MemClear, MemCopy
 .export FarCall, FarCallRet, WaitVBlank, ScreenOff, ScreenOn, SetMirror
 
@@ -147,7 +147,7 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 .proc MAIN
 @loop:
     jsr ReadInput
-    jsr VBufReset
+    jsr VBufRecycle
     jsr GameFrame
     jsr WaitFrame
     jmp @loop
@@ -211,23 +211,34 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 ; -----------------------------------------------------------------------------
 ; FlushVBuf — write the queued packets to VRAM. NMI only.
 ;
-; Scratch here is vram_mode/vram_cnt, never tmp0..tmp7. The NMI lands between
-; arbitrary main-thread instructions, so anything it borrows is destroyed under
-; whoever it interrupted — and VBufAlloc itself parks the packet size in tmp0
-; across the header writes, so borrowing tmp0 here scrambled the queue.
+; Scratch here is vram_mode/vram_cnt/vram_left, never tmp0..tmp7. The NMI lands
+; between arbitrary main-thread instructions, so anything it borrows is
+; destroyed under whoever it interrupted — and VBufAlloc itself parks the packet
+; size in tmp0 across the header writes, so borrowing tmp0 here scrambled it.
+;
+; It writes at most VBUF_BUDGET bytes and leaves the rest for the next frame.
+; Flushing the whole queue however big it had grown is what made battles
+; flicker: composing a message blanks four interior lines and the menu pacer
+; writes two more, so one button press queued six 32-tile rows — about 3000
+; cycles of PPUDATA against the ~1700 vblank affords, with the overspill landing
+; in active rendering. The queue is drained front to back across frames through
+; vbuf_rp; the main thread only recycles it once NMI has emptied it, so nothing
+; is ever moved under a half-finished VBufAlloc.
 ; -----------------------------------------------------------------------------
 .proc FlushVBuf
-    lda #<VBUF
-    sta vram_ptr
     lda #>VBUF
-    sta vram_ptr+1
+    sta vram_ptr+1          ; VBUF is page aligned: the high byte never moves
+    lda vbuf_rp
+    sta vram_ptr
+    lda #VBUF_BUDGET
+    sta vram_left
 @next:
     ldy #0
     lda (vram_ptr),y
-    bne @go
-    rts
-@go:
-    sta vram_mode           ; mode
+    beq @drained
+    ldx vram_left
+    beq @done               ; budget spent: the rest goes out next frame
+    sta vram_mode
     cmp #2
     beq @col
     lda ppu_ctrl
@@ -267,26 +278,59 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
     bne :-
     iny
 @adv:
-    tya
+    tya                     ; step past this packet
     clc
     adc vram_ptr
     sta vram_ptr
-    bcc @next
-    inc vram_ptr+1
+    lda vram_left           ; charge the PPUDATA writes, floor at zero
+    sec
+    sbc vram_cnt
+    bcs :+
+    lda #0
+:   sta vram_left
     jmp @next
+@drained:
+@done:
+    lda vram_ptr            ; where the next NMI picks up
+    sta vbuf_rp
+    rts
 .endproc
 
 ; -----------------------------------------------------------------------------
-; VBufReset — empty the transfer queue (called once per frame by MAIN).
+; VBufReset — empty the transfer queue. Boot only; the main loop calls
+; VBufRecycle instead.
 ; -----------------------------------------------------------------------------
 .proc VBufReset
     lda #<VBUF
     sta vbuf_wp
+    sta vbuf_rp
     lda #>VBUF
     sta vbuf_wp+1
     lda #0
     ldy #0
     sta (vbuf_wp),y
+    rts
+.endproc
+
+; -----------------------------------------------------------------------------
+; VBufRecycle — called once a frame by MAIN. Rewinds the queue to the front,
+; but only once NMI has drained it: while a backlog is still going out, new
+; packets append behind it. Both pointers live in page $03, so reading NMI's
+; vbuf_rp is a single-byte load and cannot tear.
+; -----------------------------------------------------------------------------
+.proc VBufRecycle
+    lda vbuf_rp
+    cmp vbuf_wp
+    bne @busy
+    lda #<VBUF
+    sta vbuf_wp
+    sta vbuf_rp
+    lda #>VBUF
+    sta vbuf_wp+1
+    lda #0
+    ldy #0
+    sta (vbuf_wp),y
+@busy:
     rts
 .endproc
 

@@ -16,6 +16,11 @@ OAM_BUF        = $0200
 ;       mode 0 = end of queue
 VBUF           = $0300
 VBUF_END       = $03F8      ; leave a little slack for the terminator
+; How many bytes of PPUDATA one NMI may write. Vblank is ~2273 cycles and
+; OAM DMA takes 513 of them; the flush loop costs about 16 cycles a byte, so
+; 80 bytes is ~1300 cycles and leaves room for the scroll restore. Anything
+; still queued slides down and goes out on the next frame.
+VBUF_BUDGET    = 80
 
 ; --- engine BSS --------------------------------------------------------------
 attr_shadow    = $0400      ; 128: two nametables' attribute tables ($0400/$0440)

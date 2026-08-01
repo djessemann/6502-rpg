@@ -124,7 +124,10 @@ scratch       = $68     ; 8 bytes of general scratch ($68-$6F)
 ; $70-$74 belong to FlushVBuf and are touched by NOTHING else: the NMI runs
 ; between arbitrary main-thread instructions, so it may not borrow tmp0..tmp7.
 vram_mode     = $70     ; NMI-only: the packet mode being flushed
-vram_cnt      = $72     ; NMI-only: its byte count
+vram_cnt      = $72
+; NMI-only scratch: the main thread must never touch these.
+vram_left     = $E2     ; bytes of PPUDATA left in this frame's budget
+vbuf_rp       = $E3     ; how far NMI has drained VBUF (offset in page $03)
 vram_ptr      = $73     ; 2
 row_ptr       = $75     ; 2
 col_ptr       = $77     ; 2

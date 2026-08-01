@@ -67,12 +67,23 @@ def _lcg(seed):
 STAR_SPOTS = [(2, 3), (5, 1), (1, 6), (6, 5), (3, 2), (4, 6), (0, 4), (7, 2)]
 
 
-def starfield(c, rows, density=5, seed=7):
-    """One star per lit tile, on one of eight fixed in-tile positions."""
+def starfield(c, rows, density=5, seed=7, fade_from=6):
+    """One star per lit tile, on one of eight fixed in-tile positions.
+
+    Density falls off with depth instead of stopping dead. A field that ends on
+    a tile row draws a ruler-straight edge across open sky, which is the first
+    thing the eye finds on the screen -- and it reads as a bug, not as a
+    horizon. `fade_from` is the tile row where the thinning begins.
+    """
     r = _lcg(seed)
-    for ty in range(rows // 8):
+    last = rows // 8
+    for ty in range(last):
+        if ty <= fade_from:
+            d = density
+        else:                       # linear thinning to nothing at `last`
+            d = max(0, round(density * (last - ty) / (last - fade_from)))
         for tx in range(TW):
-            if next(r) % 16 >= density:
+            if next(r) % 16 >= d:
                 continue
             sx, sy = STAR_SPOTS[next(r) % len(STAR_SPOTS)]
             roll = next(r) % 10
@@ -81,10 +92,15 @@ def starfield(c, rows, density=5, seed=7):
 
 
 def planet(c, cx, cy, radius):
-    """A gas giant's limb: banded, lit from the upper left, cut off by the sky.
+    """A gas giant's limb: lit from the upper left, cut off by the sky.
 
     Only the part of the disc that lands inside the canvas is drawn, so placing
     the centre off the right edge gives a crescent of a very large world.
+
+    Shading is a spherical falloff from an off-centre light, with the belts
+    modulating it rather than replacing it. The earlier version cycled three
+    flat values on a fixed period, which drew hard equal-weight stripes across
+    the disc and read as a beach ball rather than a world.
     """
     r2 = radius * radius
     for y in range(max(0, cy - radius), min(H, cy + radius + 1)):
@@ -94,12 +110,15 @@ def planet(c, cx, cy, radius):
             d2 = dx * dx + dy * dy
             if d2 > r2:
                 continue
-            band = ((y + (dx * dx) // (radius * 2)) // 7) % 3
-            v = (3, 2, 1)[band]
-            if d2 > r2 - radius * 6:            # the rim catches the light
-                v = 3
-            if dx > radius // 3 and dy > 0:     # the far side falls into night
-                v = 1 if v > 1 else 0
+            # distance from the lit point, up and to the left of centre
+            lx, ly = dx + radius * 0.5, dy + radius * 0.5
+            lit = 1.0 - (lx * lx + ly * ly) / (r2 * 2.4)
+            # belts: bowed by the curvature of the sphere, and only a nudge
+            belt = ((y + (dx * dx) // (radius * 3)) // 6) % 2
+            lit -= 0.11 * belt
+            v = 3 if lit > 0.63 else (2 if lit > 0.36 else 1)
+            if d2 > r2 - radius * 2:            # a thin lit limb all the way
+                v = max(v, 2)                   # round, so the disc reads solid
             c.put(x, y, v)
 
 

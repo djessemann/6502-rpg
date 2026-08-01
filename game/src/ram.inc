@@ -183,9 +183,11 @@ sel_max        = $6CF9
 sel_top        = $6CFA
 lvl_i          = $6CFB
 tmp_wide       = $6CFC
-btl_blink      = $6CFD      ; enemy slot flashed out by a hit ($FF = none)
-btl_blinkt     = $6CFE      ; frames until it is painted back
-btl_dirty      = $6CFF      ; bitmask of enemy slots whose tiles are out of date
+btl_flash      = $6CFD      ; bitmask of enemy slots lit white by a hit
+btl_blinkt     = $6CFE      ; frames until they go back to their own colours
+btl_dirty      = $6CFF      ; bitmask of enemy slots whose tiles or colours are
+                            ; out of date; ArenaTick repaints one a frame
+btl_hitf       = $6D94      ; frames left of the backdrop flash the party takes
 tech_rec       = $6D70      ; 6: the tech record being applied
 ; What each HUD row is currently showing: hp lo/hi, hpmax lo/hi, tp, status.
 ; HudTick compares the live stats against this every frame and redraws any row

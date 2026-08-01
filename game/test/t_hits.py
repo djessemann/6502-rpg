@@ -12,10 +12,12 @@ sat behind it.
     changed no pixel anywhere -- the fight was a menu with a story attached.
 
 Both are now driven off btl_dirty: a kill or a hit sets the slot's bit and
-ArenaTick repaints that slot from the live state on a later frame.  This test
-counts non-blank tiles in the arena rows over a whole fight and asserts the
-arena both ends up empty (every corpse was erased) and dips-and-recovers at
-least once along the way (a hit that did not kill flashed its target).
+ArenaTick repaints that slot from the live state on a later frame.  A kill
+blanks its tiles; a hit only rewrites the attribute bytes over that monster,
+turning it white for a few frames without moving a single tile.  So this
+watches two different things: the arena's tile count must end at zero (every
+corpse was erased) and some attribute byte must go to the flash palette and
+come back (a hit that did not kill lit its target up).
 
 It has to use pyntendo's pure-Python core: the fast core renders frames but
 exposes no VRAM, and "is that enemy still drawn" is a nametable question.  That
@@ -84,6 +86,15 @@ def in_battle(nes):
     return nes.memory.ram[GAMESTATE] == GS_BATTLE
 
 
+FLASH_ATTR = 0xAA               # sub-palette 2 in all four quadrants
+
+
+def flash_cells(nes):
+    """Attribute bytes currently set to the hit-flash palette."""
+    v = nes.ppu.vram
+    return sum(1 for i in range(64) if v.read(0x23C0 + i) == FLASH_ATTR)
+
+
 def arena_tiles(nes):
     """Non-blank background tiles in the arena rows.
 
@@ -128,15 +139,16 @@ def to_battle(rom, walk_steps=60):
 
 def fight(nes, t, limit=120):
     """Mash A through the fight, sampling the arena every other frame."""
-    counts = []
+    counts, lit = [], []
     for _ in range(limit):
         T.run_frames(nes, t, 2, keys=[(t.frame, A)])
         if not in_battle(nes):
             break               # the field is back; those tiles are the map
         counts.append(arena_tiles(nes))
+        lit.append(flash_cells(nes))
         if counts[-1] == 0:
             break
-    return counts
+    return counts, lit
 
 
 def runs(counts):
@@ -149,17 +161,16 @@ def runs(counts):
     return out
 
 
-def flashes(counts):
-    """Runs where the arena lost tiles and then got them back.
+def flashes(lit):
+    """Times the flash palette appeared over a monster and then went away.
 
-    Counted over runs, not samples. A flash is BLINK_FRAMES long and this
-    samples every other frame, so it always shows as three or four samples at
-    the lower count with a higher one on either side -- a first version of this
-    looked for a one-sample dip and scored a textbook flash as zero.
+    Counted over runs, not samples: FLASH_FRAMES is several frames long and
+    this samples every other frame, so one flash is a run of nonzero cells
+    between two runs of zero.
     """
-    rs = runs(counts)
+    rs = runs(lit)
     return sum(1 for i in range(1, len(rs) - 1)
-               if rs[i][0] < rs[i - 1][0] and rs[i + 1][0] > rs[i][0])
+               if rs[i][0] > 0 and rs[i - 1][0] == 0 and rs[i + 1][0] == 0)
 
 
 def measure(rom, label):
@@ -167,32 +178,35 @@ def measure(rom, label):
     if nes is None:
         print(f"  ({label}: no encounter)")
         return None
-    counts = fight(nes, t)
-    print(f"  {label}: " + " ".join(f"{v}x{n}" for v, n in runs(counts)))
-    return counts
+    counts, lit = fight(nes, t)
+    print(f"  {label} tiles: " + " ".join(f"{v}x{n}" for v, n in runs(counts)))
+    print(f"  {label} flash: " + " ".join(f"{v}x{n}" for v, n in runs(lit)))
+    return counts, lit
 
 
 print("the real ROM")
-c = measure(GAME / "threnos.nes", "arena tiles")
-if c is None:
+got = measure(GAME / "threnos.nes", "arena")
+if got is None:
     print("no encounter; cannot measure"); sys.exit(1)
+c, lit = got
 check(c[0] > 0 and c[-1] == 0,
       f"the arena starts full and is empty by the end of the fight "
       f"({c[0]} -> {c[-1]} tiles)")
-check(flashes(c) >= 1,
-      f"and a hit that does not kill flashes the target "
-      f"({flashes(c)} dip-and-recover)")
+check(flashes(lit) >= 1,
+      f"and a hit that does not kill lights its target up "
+      f"({flashes(lit)} flashes, peak {max(lit)} cells)")
 
 print("\nthe control (TEST_STATIC_ARENA stops anything marking a slot)")
 ctl = build(GAME / "test" / "threnos_static_arena.nes",
             ["-D", "TEST_STATIC_ARENA=1"])
-cc = measure(ctl, "arena tiles")
-if cc is None:
+cgot = measure(ctl, "arena")
+if cgot is None:
     check(False, "the control reached a battle")
 else:
-    check(cc[-1] != 0 and flashes(cc) == 0,
+    cc, clit = cgot
+    check(cc[-1] != 0 and flashes(clit) == 0,
           f"the control's arena never changes ({cc[0]} -> {cc[-1]} tiles, "
-          f"{flashes(cc)} flashes) - so the checks above mean something")
+          f"{flashes(clit)} flashes) - so the checks above mean something")
 
 print()
 if FAIL:

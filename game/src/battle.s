@@ -470,10 +470,10 @@ ST_KEEP = ST_POISON|ST_DOWN
     dey
     bne @clr
 
-    lda #$FF
-    sta btl_blink
     lda #0
-    sta btl_dirty           ; the direct draw below leaves every slot current
+    sta btl_flash           ; nothing is mid-flash, and the direct draw below
+    sta btl_dirty           ; leaves every slot's tiles and colours current
+    sta btl_hitf
     jsr DrawEnemies
     jsr DrawWindowDirect
     jsr DrawHudDirect
@@ -872,10 +872,13 @@ enemy_y:  .byte  6,  0,  0,  0
 ; POISON / STUN / BLIND / SILENCE, in ST_* bit order
 status_letters: .byte "PTBS"
 batt_pal:
-    .byte $0F,$16,$27,$30
-    .byte $0F,$11,$21,$30
-    .byte $0F,$09,$19,$29
-    .byte $0F,$00,$10,$30
+    .byte $0F,$16,$27,$30   ; 0: monster type 0
+    .byte $0F,$11,$21,$30   ; 1: monster type 1
+    .byte $0F,$30,$30,$30   ; 2: the hit flash - the monster goes white
+    .byte $0F,$00,$10,$30   ; 3: window, HUD, text
+
+; An attribute byte carrying one sub-palette in all four of its quadrants.
+attr_fill: .byte $00,$55,$AA,$FF
 
 ; =============================================================================
 ; The window: drawn once, directly, while rendering is off
@@ -1065,7 +1068,8 @@ HUD_ROW = 25
     lda btl_phase
     cmp #BP_DONE
     bcs @done               ; the fight is over and the field owns the screen
-    jsr BlinkTick           ; again: these two must not queue rows over it
+    jsr FlashTick           ; again: these must not queue writes over it
+    jsr HitFlashTick
     jsr ArenaTick
     jsr HudTick
     lda btl_phase
@@ -2299,7 +2303,11 @@ HUD_ROW = 25
 
 ; Subtract dmg from combatant btl_target, clamping at zero and killing it.
 .proc ApplyDamage
-    ldy btl_target
+    lda btl_target
+    cmp #4
+    bcs :+
+    jsr PartyHitFlash       ; they have no body in the arena to light up
+:   ldy btl_target
     lda b_hp,y
     sec
     sbc dmg_lo
@@ -2333,7 +2341,7 @@ HUD_ROW = 25
     rts
 
 @hurt:
-    jmp BlinkTarget
+    jmp FlashTarget
 .endproc
 
 ; --- arena repaint -----------------------------------------------------------
@@ -2371,13 +2379,18 @@ HUD_ROW = 25
     rts
 @paint:
     txa
-    pha                     ; EraseEnemy/RedrawEnemy do not promise to keep X
+    pha                     ; EraseEnemy/AttrSlot do not promise to keep X
     lda b_alive+4,x
-    beq @blank
-    txa
-    cmp btl_blink           ; btl_blink is $FF when nothing is flashed out
-    beq @blank
-    jsr RedrawEnemy
+    beq @blank              ; dead: its tiles go, and stay gone
+    lda bitmask,x
+    and btl_flash
+    beq @normal
+    lda #2                  ; being hit right now: white
+    jmp @attr
+@normal:
+    lda btl_slot_type,x     ; its own colours back
+@attr:
+    jsr AttrSlot
     jmp @sink
 @blank:
     jsr EraseEnemy
@@ -2445,68 +2458,97 @@ HUD_ROW = 25
     rts
 .endproc
 
-; X = enemy slot: repaint its tiles through VBUF, so it is safe with rendering
-; on. DrawOneEnemy writes PPUDATA directly and may only be used while the
-; screen is off.
-.proc RedrawEnemy
-    jsr EnemySlotPos
-    lda btl_slot_type,x
-    beq :+
-    lda #$C0
-    jmp :++
-:   lda #$80
-:   sta loop_j              ; running tile index
+; X = enemy slot, A = sub-palette: queue the attribute bytes covering that
+; monster's block, which recolours it without touching a single tile.
+;
+; This is how a hit is shown. Blanking the monster's tiles and painting them
+; back cost 16 to 64 bytes of VBUF each way for every hit, made the monster
+; vanish rather than react, and left it half-drawn whenever the queue was busy
+; enough to refuse a row. One to four attribute bytes land in a single frame
+; and cannot tear: the tiles never move.
+;
+; Carry set if the queue had no room for all of them.
+.proc AttrSlot
+    pha
+    jsr EnemySlotPos        ; (it owns tmp7, so everything below is set after)
+    pla
+    tay
+    lda attr_fill,y
+    sta tmp3                ; the byte to write. NOT tmp0-tmp2: VBufAlloc uses
+                            ; those three as its own scratch, and the first
+                            ; allocation below would eat both the colour and
+                            ; the column, which is what half-flashed a monster
+                            ; white and left the rest of it its own colour.
+    lda tmpa                ; the attribute cells the block touches, inclusive:
+    lsr a                   ; a cell is four tiles square
+    lsr a
+    sta tmp4                ; first column
+    lda tmpa
+    clc
+    adc tmpd
+    sec
+    sbc #1
+    lsr a
+    lsr a
+    sec
+    sbc tmp4
+    sta tmp5                ; columns - 1
+    lda tmpb
+    lsr a
+    lsr a
+    sta tmp6                ; first row
+    lda tmpb
+    clc
+    adc tmpd
+    sec
+    sbc #1
+    lsr a
+    lsr a
+    sec
+    sbc tmp6
+    sta tmp7                ; rows - 1
     lda #0
     sta sub_i
     sta sub_j               ; rows the queue had no room for
-@row:
-    lda tmpb
-    clc
+@arow:
+    lda tmp6                ; $23C0 + row*8 + col; the index is under 64, so
+    clc                     ; the low byte cannot carry into $24
     adc sub_i
-    sta tmp0
-    lsr a
-    lsr a
-    lsr a
-    clc
-    adc #$20
-    sta vb_hi
-    lda tmp0
-    and #7
-    asl a
-    asl a
     asl a
     asl a
     asl a
     clc
-    adc tmpa
+    adc tmp4
+    clc
+    adc #$C0
     sta vb_lo
+    lda #$23
+    sta vb_hi
     lda #1
     sta vb_mode
-    lda tmpd
+    lda tmp5
+    clc
+    adc #1
+    sta loop_j              ; cells in this row (vb_cnt is not ours to keep)
     sta vb_cnt
     jsr VBufAlloc
     bcs @full
     ldy #0
-@col:
-    lda loop_j
+:   lda tmp3
     sta (vb_dat),y
-    inc loop_j
     iny
-    cpy tmpd
-    bcc @col
+    cpy loop_j
+    bcc :-
     jmp @adv
-@full:                      ; queue full: keep the tile index aligned anyway
+@full:
     inc sub_j
-    lda loop_j
-    clc
-    adc tmpd
-    sta loop_j
 @adv:
     inc sub_i
     lda sub_i
-    cmp tmpd
-    bcc @row
-    lda sub_j               ; carry = "come back for this slot next frame"
+    cmp tmp7
+    bcc @arow
+    beq @arow               ; tmp7 is one less than the number of rows
+    lda sub_j
     beq @ok
     sec
     rts
@@ -2515,46 +2557,89 @@ HUD_ROW = 25
     rts
 .endproc
 
-; A hit that does not kill blanks the target for a few frames and paints it
-; back. Without it the arena never moves: the only sign an attack landed was a
-; line of text, so a fight read as a menu with a story attached.
-BLINK_FRAMES = 8
+; A hit recolours its target white for a few frames. Before this the arena
+; never moved: the only sign an attack landed was a line of text, so a fight
+; read as a menu with a story attached.
+;
+; It is a bitmask, not one slot: an all-enemy tech hits everything at once and
+; flashing only the first of them read as a bug. Attribute writes are one to
+; four bytes apiece, so lighting up all four costs less than repainting one
+; monster's tiles used to.
+FLASH_FRAMES = 5            ; short enough to read as a flash, long enough that
+                            ; ArenaTick's one-slot-a-frame pace still shows it
 
-.proc BlinkTarget
+.proc FlashTarget
     lda btl_target
     sec
     sbc #4
     cmp #4
-    bcs @none               ; a party member: its HUD row is the feedback
-    ldx btl_blink           ; whoever is flashed out at the moment
-    cpx #4
-    bcs @set                ; $FF, so nobody is
-    sta btl_blink           ; the new target takes the flash over...
-    jsr MarkSlot            ; ...and the one it took it from is painted back,
-    jmp @timer              ; so mashing through a round still flashes each hit
-@set:
-    sta btl_blink
-@timer:
-    ldx btl_blink
-    lda #BLINK_FRAMES
-    sta btl_blinkt
+    bcs @none               ; a party member: PartyHitFlash covers those
+    tax
+    lda bitmask,x
+    ora btl_flash
+    sta btl_flash
+    lda #FLASH_FRAMES
+    sta btl_blinkt          ; a shared timer: they all light and clear together
     jmp MarkSlot
 @none:
     rts
 .endproc
 
+; The party has no body in the arena -- they are four lines of a HUD -- so a hit
+; on them has no monster to light up. It flashes the backdrop instead: every
+; black pixel on the screen goes red for a couple of frames. That is the oldest
+; damage cue on the console and it costs one byte of PPU write.
+HIT_FRAMES = 3              ; one frame to put the colour up, one to take it
+                            ; down, so about two frames of red
+
+.proc PartyHitFlash
+    lda #HIT_FRAMES
+    sta btl_hitf
+    rts
+.endproc
+
+.proc HitFlashTick
+    lda btl_hitf
+    beq @done
+    dec btl_hitf
+    beq @off
+    lda #$16                ; red
+    jmp @put
+@off:
+    lda #$0F                ; and back to black
+@put:
+    sta tmp1
+    lda #$3F                ; $3F00 is the universal backdrop
+    sta vb_hi
+    lda #$00
+    sta vb_lo
+    lda #1
+    sta vb_mode
+    sta vb_cnt
+    jsr VBufAlloc
+    bcs @wait
+    ldy #0
+    lda tmp1
+    sta (vb_dat),y
+    rts
+@wait:
+    inc btl_hitf            ; no room this frame: hold the flash rather than
+@done:                      ; risk leaving the backdrop stuck on red
+    rts
+.endproc
+
 ; Called every frame from BattleTick, ahead of ArenaTick: this decides what the
 ; arena should look like, ArenaTick makes it so.
-.proc BlinkTick
-    lda btl_blink
-    cmp #$FF
+.proc FlashTick
+    lda btl_flash
     beq @done
     dec btl_blinkt
     bne @done
-    tax                     ; A still holds the slot
-    lda #$FF
-    sta btl_blink
-    jmp MarkSlot            ; if it died meanwhile, ArenaTick leaves it blank
+    lda btl_flash           ; time up: every slot that was lit needs its own
+    ora btl_dirty           ; colours putting back
+    sta btl_dirty
+    lda #0
+    sta btl_flash
 @done:
     rts
 .endproc

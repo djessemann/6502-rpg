@@ -26,6 +26,10 @@
 
 .export BattleEnter, BattleTick, BattleResult, XpAward
 .export LearnTechs, Rederive, InitParty, RollEncounter
+; field.s asks whether the battle is over. It used to hardcode the number,
+; and adding a phase silently made 'choose who the medkit is for' read as
+; 'the fight has ended'.
+.export BP_DONE
 
 ; battle phases
 BP_INTRO   = 0
@@ -38,7 +42,8 @@ BP_MSG     = 6
 BP_VICTORY = 7
 BP_DEFEAT  = 8
 BP_FLED    = 9
-BP_DONE    = 10
+BP_ALLYSEL = 10             ; which member a healing item is for
+BP_DONE    = 11
 
 ; commands
 CMD_FIGHT = 0
@@ -1201,6 +1206,8 @@ BOX_ROW = 20
     beq @target
     cmp #2
     beq @tech
+    cmp #4
+    beq @ally
     lda sub_j
     jmp ItemLine
 @cmd:
@@ -1222,6 +1229,9 @@ BOX_ROW = 20
 @tech:
     lda sub_j
     jmp TechLine
+@ally:
+    lda sub_j
+    jmp AllyLine
 .endproc
 
 .proc PhCmd
@@ -1741,6 +1751,158 @@ BOX_ROW = 20
     jmp BPut
 .endproc
 
+; A = item id -> carry set if it acts on one chosen party member.
+; Effects 1 heal, 2 cure, 3 revive and 4 restore TP all do; 5 (a bomb) hits
+; every enemy and needs no target.
+.proc ItemNeedsAlly
+    jsr ItemEffect
+    beq @no
+    cmp #5
+    bcs @no
+    sec
+    rts
+@no:
+    clc
+    rts
+.endproc
+
+; A = item id -> A = its effect byte, with BANK_TABLES mapped.
+.proc ItemEffect
+    sta mul_a
+    lda #ITEM_REC
+    sta mul_b
+    jsr Mul8
+    lda #BANK_TABLES
+    jsr SetPrgData
+    lda mul_res
+    clc
+    adc #<item_tab
+    sta srcp
+    lda mul_res+1
+    adc #>item_tab
+    sta srcp+1
+    ldy #6
+    lda (srcp),y
+    rts
+.endproc
+
+; --- choosing which member the item is for -----------------------------------
+; Starts on the first member who is still standing, unless the item revives, in
+; which case a corpse is exactly who you want the cursor on.
+.proc StartAllySel
+    ldx btl_actor
+    lda act_arg,x
+    jsr ItemEffect
+    cmp #3
+    beq @dead
+    ldx #0
+@alive:
+    lda b_alive,x
+    bne @got
+    inx
+    cpx #4
+    bcc @alive
+    ldx #0
+    beq @got
+@dead:
+    ldx #0
+@corpse:
+    lda b_alive,x
+    beq @got
+    inx
+    cpx #4
+    bcc @corpse
+    ldx #0
+@got:
+    stx sel_i
+    lda #BP_ALLYSEL
+    sta btl_phase
+    lda #4
+    sta list_kind
+    lda #$0F
+    sta ui_pending
+    rts
+.endproc
+
+; A = line: one party row, for the ally picker.
+.proc AllyLine
+    sta sub_i
+    jsr BClear
+    lda sub_i
+    cmp #4
+    bcs @put
+    cmp sel_i
+    bne :+
+    lda #TILE_CURSOR
+    sta linebuf+2
+:   lda sub_i
+    jsr CombatantName
+    ldx #4
+    jsr BStr
+    ldx sub_i
+    lda b_alive,x
+    beq @down
+    lda b_hp,x
+    sta num_lo
+    lda b_hp+8,x
+    sta num_hi
+    ldx #22
+    jsr PutNumber
+    jmp @put
+@down:
+    lda #<s_fallen
+    sta ptr
+    lda #>s_fallen
+    sta ptr+1
+    ldx #18
+    jsr BStr
+@put:
+    lda sub_i
+    jmp BPut
+.endproc
+
+.proc PhAllySel
+    jsr UiFlush
+    lda pad1_new
+    and #BTN_B
+    beq :+
+    jsr StartItemSel            ; back to the pack
+    rts
+:   lda pad1_new
+    and #(BTN_DOWN | BTN_RIGHT)
+    beq :+
+    inc sel_i
+    lda sel_i
+    cmp #4
+    bcc @redraw
+    lda #0
+    sta sel_i
+    beq @redraw
+:   lda pad1_new
+    and #(BTN_UP | BTN_LEFT)
+    beq :+
+    dec sel_i
+    bpl @redraw
+    lda #3
+    sta sel_i
+    bne @redraw
+:   lda pad1_new
+    and #BTN_A
+    beq @done
+    lda sel_i
+    ldx btl_actor
+    sta act_tgt,x
+    inc btl_actor
+    jmp StartCommand
+@redraw:
+    lda #SFX_CURSOR
+    sta sfx_req
+    lda #$0F
+    sta ui_pending
+@done:
+    rts
+.endproc
+
 .proc PhItemSel
     jsr UiFlush
     lda pad1_new
@@ -1779,7 +1941,12 @@ BOX_ROW = 20
     sta act_arg,x
     lda #0
     sta act_tgt,x
-    inc btl_actor
+    ldx sel_i                   ; a healing item needs to know WHO. Bombs do
+    lda tmp_buf,x               ; not, and go straight to the next actor.
+    jsr ItemNeedsAlly
+    bcc :+
+    jmp StartAllySel
+:   inc btl_actor
     jmp StartCommand
 @scroll:
     lda sel_i
@@ -2657,7 +2824,10 @@ BOX_ROW = 20
     ldx btl_actor
     lda act_arg,x
     sta tmp5
-    ; find and consume it
+    ldx btl_actor
+    lda act_tgt,x
+    sta tmp1                    ; who it is for (0-3), chosen at BP_ALLYSEL
+    ; find it, but do not spend it until the effect is known to do something
     ldx #0
 @find:
     lda inv_id,x
@@ -2670,11 +2840,8 @@ BOX_ROW = 20
     ldx #>s_noeffect
     jmp MsgActor
 @got:
-    dec inv_ct,x
-    bne :+
-    lda #0
-    sta inv_id,x
-:   lda tmp5
+    stx tmp7                    ; the inventory slot
+    lda tmp5
     sta mul_a
     lda #ITEM_REC
     sta mul_b
@@ -2702,36 +2869,109 @@ BOX_ROW = 20
     beq @heal
     cmp #2
     beq @cure
+    cmp #3
+    beq @revive
+    cmp #4
+    beq @tp
     cmp #5
-    beq @bomb
+    bne @nothing
+    jmp @bomb
+@nothing:
     lda #<s_noeffect
     ldx #>s_noeffect
     jmp MsgActor
+
+; A medkit goes to the member the player chose, not to whoever happened to be
+; holding it, and it never raises the dead -- that is what a stimpack is for.
 @heal:
-    ldx btl_actor
+    ldx tmp1
+    lda b_alive,x
+    beq @nothing
+    jsr Spend
+    ldx tmp1
     jsr HealCombatant
     lda #<s_healed
     ldx #>s_healed
     jmp MsgActor
+
 @cure:
-    lda tmp3
-    eor #$FF
-    sta tmp3                ; the bits to keep
-    ldx #0
-@curelp:
+    ldx tmp1
     lda b_alive,x
-    beq @curenext
+    beq @nothing
     lda b_status,x
     and tmp3
+    beq @nothing            ; nothing this item cures is on them
+    jsr Spend
+    lda tmp3
+    eor #$FF
+    ldx tmp1
+    and b_status,x
     sta b_status,x
-@curenext:
-    inx
-    cpx #4
-    bcc @curelp
     lda #<s_cleanses
     ldx #>s_cleanses
     jmp MsgActor
+
+; The one item that matters most in a losing fight, and it did nothing at all:
+; effect 3 fell straight through to "no effect" while still being consumed.
+@revive:
+    ldx tmp1
+    lda b_alive,x
+    bne @nothing            ; they are already standing
+    jsr Spend
+    ldx tmp1
+    lda #1
+    sta b_alive,x
+    lda b_status,x
+    and #<(~ST_DOWN & $FF)
+    sta b_status,x
+    lda #0                  ; brought back on the item's power, not on nothing
+    sta b_hp,x
+    sta b_hp+8,x
+    jsr HealCombatant
+    lda #<s_revived
+    ldx #>s_revived
+    jmp MsgActor
+
+@tp:
+    ldx tmp1
+    lda b_alive,x
+    beq @nothing
+    lda tmp1
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tay
+    lda party+c_tp,y
+    cmp party+c_tpmax,y
+    bcc :+
+    jmp @nothing            ; already full
+:   jsr Spend
+    ldx tmp1
+    txa
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tay
+    lda party+c_tp,y
+    clc
+    adc tmp0
+    bcs @tpfull
+    cmp party+c_tpmax,y
+    bcc @tpset
+@tpfull:
+    lda party+c_tpmax,y
+@tpset:
+    sta party+c_tp,y
+    lda #<s_restored
+    ldx #>s_restored
+    jmp MsgActor
+
 @bomb:
+    jsr Spend
     lda tmp0
     sta tmp6
     ldx #4
@@ -2753,6 +2993,17 @@ BOX_ROW = 20
     lda #<s_techall
     ldx #>s_techall
     jmp MsgActor
+.endproc
+
+; The item is only spent once the effect is known to do something: a stimpack
+; used on someone already standing, or a medkit on a corpse, must not vanish.
+.proc Spend
+    ldx tmp7
+    dec inv_ct,x
+    bne :+
+    lda #0
+    sta inv_id,x
+:   rts
 .endproc
 
 ; =============================================================================
@@ -3630,6 +3881,7 @@ phase_tab:
     .addr PhVictory-1
     .addr PhDefeat-1
     .addr PhFled-1
+    .addr PhAllySel-1
 
 cmd_row:  .byte 1, 1, 1, 2, 2
 cmd_col:  .byte 1, 9, 17, 1, 9
@@ -3656,6 +3908,9 @@ s_st_sil:   .byte "SILENCED!", STR_END
 s_techall:  .byte "STRIKES ALL!", STR_END
 s_healed:   .byte "MENDS THE PARTY.", STR_END
 s_noeffect: .byte "NO EFFECT.", STR_END
+s_fallen:   .byte "FALLEN", STR_END
+s_revived:  .byte "IS BACK UP!", STR_END
+s_restored: .byte "RECHARGES.", STR_END
 s_appears:  .byte "APPEARS!", STR_END
 s_victory:  .byte "THE PARTY IS VICTORIOUS!", STR_END
 s_xp:       .byte " XP", STR_END
@@ -3702,8 +3957,11 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     sta party+c_name,x
     lda #1
     sta party+c_level,x
-    ; base stats from the class table
-    lda lvl_i
+    ; base stats from the class table -- the CHOSEN class, not the slot. Using
+    ; lvl_i here gave every muster the same four stat lines under whatever four
+    ; names the player picked.
+    ldy lvl_i
+    lda party_class,y
     sta mul_a
     lda #CLASS_REC
     sta mul_b
@@ -3792,6 +4050,37 @@ s_cmd2:     .byte "GUARD   RUN", STR_END
     cpx #64
     bne :-
     sta vehicles
+.ifdef TEST_DOWN_ONE
+    ; Slot 1 starts fallen, and the pack carries the two items whose effects
+    ; used to fall through to "no effect" while still being consumed. A test can
+    ; then watch a revive work on a corpse and refuse on someone standing.
+    ldy #PARTY_SIZE
+    lda #0
+    sta party+c_hp,y
+    sta party+c_hp+1,y
+    lda #ST_DOWN
+    sta party+c_status,y
+    lda #IT_STIMPACK
+    sta inv_id+2
+    lda #3
+    sta inv_ct+2
+    lda #IT_TP_CELL
+    sta inv_id+3
+    lda #3
+    sta inv_ct+3
+.endif
+.ifdef TEST_HURT_PARTY
+    ; One member -- slot 1 -- starts on 1 HP and poisoned, so a test can watch a
+    ; heal and a cure actually do something while every other member stays at
+    ; full health, which is the case where they must correctly refuse.
+    ldy #PARTY_SIZE
+    lda #1
+    sta party+c_hp,y
+    lda #0
+    sta party+c_hp+1,y
+    lda #ST_POISON
+    sta party+c_status,y
+.endif
     rts
 .endproc
 

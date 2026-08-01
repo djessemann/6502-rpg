@@ -14,6 +14,8 @@ SRCS    := $(SRCDIR)/header.s \
            $(SRCDIR)/text.s \
            $(SRCDIR)/battle.s \
            $(SRCDIR)/title.s \
+           $(SRCDIR)/menu.s \
+           $(SRCDIR)/shop.s \
            $(GENDIR)/chr.s \
            $(GENDIR)/title.s \
            $(GENDIR)/tables.s \

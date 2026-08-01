@@ -36,6 +36,9 @@ python3 test/t_battleai.py   # enemy casters, status effects, and their control
 python3 test/t_titlescreen.py # the title module against stubs, with save tests
 python3 test/t_title.py      # the title in the real ROM, through to the field
 python3 test/t_ending.py     # THE ARCHON -> ARCHON PRIME -> the ending
+python3 test/t_menu.py       # START: item, equip, tech, the character sheet
+python3 test/t_shop.py       # buying, selling, and a save terminal
+python3 test/t_item.py       # who a battle item is for, and revive
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.
@@ -165,34 +168,43 @@ opens the ridge around the Rift basin — which is where Lastport's endgame shop
 and Erebus itself are. `tools/check_progress.py` solves that graph forward from
 an empty save every build.
 
+START opens a **field menu** (bank 26): ITEM, EQUIP, TECH and a full character
+sheet. Items heal, cure, revive and restore TP on a member you choose; EQUIP
+swaps gear against the class mask and re-derives the stats through `Rederive`
+in the battle bank; TECH spends TP on support techs and refuses the ones that
+only work in a fight. **Shops** (bank 29) buy and sell at half price, and save
+terminals write the file.
+
 The save file lives at $6200 behind a magic word and a checksum; the live game
 state is $6006-$61FF and a save is a copy of it. `SaveGame`, `LoadGame` and
-`SaveValid` are in `src/title.s` and `StampPosition` in `field.s` writes the
-party's position into the block. **Nothing calls `SaveGame` yet** — the save
-terminals are the missing piece.
+`SaveValid` are in `src/title.s`, `StampPosition` in `field.s` writes the
+party's position into the block, and the save terminals in `shop.s` call both.
+`t_titlescreen.py` proves the round trip and that a file whose checksum no
+longer matches is refused. What no test here can prove is that the battery
+survives a power cycle: pyntendo has no cartridge-battery file. The iNES header
+sets the battery bit (flags6 = $43), which is what makes FCEUX and Mesen write
+a `.sav`, but confirming that end needs one of those emulators.
 
 -----
 
 ## Next work, in order
 
-**1. Field menus and shops.** New code banks 26 and 29. START does nothing;
-shop and save objects exist on all six town maps and fall through to "nothing
-happens", so a player who finds an EXO FRAME in a chest has no way to wear it.
-`FindObject`/`TalkOrAct` in `field.s` already locate them. This also wires
-`SaveGame` up to the save terminals, which is the last piece of the save
-system.
-
-**2. Revive.** REVIVE, LAZARUS and STIMPACK (item effect 3) all exist in the
-data and do nothing — `HealCombatant` will not raise a downed member. This is
-the biggest remaining gap in the battle system and the reason ARCHON PRIME sits
-at 76% rather than higher: a death spiral has no counter.
-
-**3. Random encounters are trivial past the early game.** Most resolve in 1-2
+**1. Random encounters are trivial past the early game.** Most resolve in 1-2
 rounds for under 5% HP; party ATK and the gear economy outscale monster HP/DEF.
-Needs a pass over the 30 non-boss monsters or over shop prices.
+Needs a pass over the 30 non-boss monsters or over shop prices. This is now the
+largest thing standing between the game and feeling finished.
 
-**4. A scripted playthrough that reaches the ending** without test defines, as
-one long QA run.
+**2. The REVIVE and LAZARUS *techs*** still do nothing. The revive *item* path
+works (`UseItem` effect 3, and the field menu's), but a tech with zero power and
+zero status mask reads as a no-op, so the two that raise the dead are inert.
+They need an explicit "this tech revives" bit in `tech_tab` rather than being
+inferred.
+
+**3. A scripted playthrough that reaches the ending** without test defines, as
+one long QA run. `test/play.py` has the window-aware walker it needs.
+
+**4. Art.** The four Anchor core floors share one plan varied only by material,
+and it shows on `test/shots/areas.png`.
 
 -----
 

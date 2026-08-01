@@ -20,9 +20,13 @@
 .export LoadMap, DecodeRow, CellAt, DrawFullMap, UpdateCamera
 .export CellProp, RowSlot, BuildRowStrip, AttrRowShadow, AttrRowForce
 .export QueueAttrRow, SyncHeroPixels
+.export ReturnToField, AddItem
+.import MenuOpen, MenuTick
+.import ShopOpen, SaveOpen, ShopTick
 .import SetMessage, OpenBox, CloseBox, BoxStep, RenderLine
 .import DrawPrompt, ClearPrompt, RowSegs, WriteRowSegs, FillRowSegs
 .import BattleEnter, BattleTick, InitParty, RollEncounter
+.importzp BP_DONE
 .import PutNumber, PutString, Mul8
 .import item_names, boss_by_map
 .import gate_flag, gate_msg, boon_tab
@@ -52,7 +56,9 @@ GS_BOXCLOSE = 5
 GS_BATTLE   = 6
 GS_GAMEOVER = 7
 GS_ENDED    = 8
-GS_TITLE    = 9
+GS_TITLE    = 9             ; title / muster   (bank 27, src/title.s)
+GS_MENU     = 10            ; the field menu    (bank 26, src/menu.s)
+GS_SHOP     = 11            ; a shop or a save terminal (bank 29, src/shop.s)
 
 TEXT_ROW0   = 21
 TEXT_LINES  = 4
@@ -74,6 +80,8 @@ OB_SHOP  = 5
 OB_INN   = 6
 OB_SAVE  = 7
 OB_TRIG  = 8
+
+MF_DUNGEON = $01                ; "inside": remember where we came in from
 
 .segment "ENGINE"
 
@@ -263,8 +271,19 @@ OB_TRIG  = 8
 .endproc
 
 ; Nothing follows the ending: hold the last frame.
+; The credits have finished. Waiting on A rather than holding the last frame
+; for ever: a player who has just finished the game should be able to get back
+; to the title and their save, not reach for the reset button.
 .proc StEnded
-    jmp BuildOAM
+    lda pad1_new
+    and #(BTN_A | BTN_START)
+    beq :+
+    lda #GS_TITLE
+    sta gamestate
+    lda #TITLE_BANK
+    jsr SetPrgCode
+    jmp TitleEnter
+:   jmp BuildOAM
 .endproc
 
 ; =============================================================================
@@ -297,12 +316,59 @@ OB_TRIG  = 8
     jsr BuildOAM
     lda ent_state
     bne @done                   ; only act when grid-aligned
+.ifndef TEST_NO_MENU
+    lda pad1_new
+    and #BTN_START
+    beq :+
+    jmp OpenMenu
+:
+.endif
     lda pad1_new
     and #BTN_A
     beq @done
     jsr TalkOrAct
 @done:
     rts
+.endproc
+
+; --- GS_MENU / GS_SHOP: the full-screen menus own the picture ----------------
+.proc StMenu
+    lda #MENU_BANK
+    jsr SetPrgCode
+    jmp MenuTick
+.endproc
+
+.proc StShop
+    lda #SPARE_BANK
+    jsr SetPrgCode
+    jmp ShopTick
+.endproc
+
+.proc OpenMenu
+    lda #GS_MENU
+    sta gamestate
+    lda #MENU_BANK
+    jsr SetPrgCode
+    jmp MenuOpen
+.endproc
+
+; A = shop id
+.proc OpenShop
+    pha
+    lda #GS_SHOP
+    sta gamestate
+    lda #SPARE_BANK
+    jsr SetPrgCode
+    pla
+    jmp ShopOpen
+.endproc
+
+.proc OpenSave
+    lda #GS_SHOP
+    sta gamestate
+    lda #SPARE_BANK
+    jsr SetPrgCode
+    jmp SaveOpen
 .endproc
 
 ; --- GS_BOXOPEN / GS_BOXCLOSE: run the window job ---------------------------
@@ -540,12 +606,19 @@ OB_TRIG  = 8
     beq @talk
     cmp #OB_SIGN
     beq @talk
-    cmp #OB_SAVE
-    beq @talk
     cmp #OB_CHEST
     beq @chest
     cmp #OB_INN
     beq @inn
+.ifndef TEST_NO_MENU
+    cmp #OB_SHOP
+    beq @shop
+    cmp #OB_SAVE
+    beq @save
+.else
+    cmp #OB_SAVE
+    beq @talk
+.endif
 @nobody:
     lda #MSG_SYS_NOTHING
     jmp ShowMessage
@@ -556,6 +629,13 @@ OB_TRIG  = 8
     jmp OpenChest
 @inn:
     jmp UseInn
+.ifndef TEST_NO_MENU
+@shop:
+    lda ent_tile,x              ; a0 = shop id
+    jmp OpenShop
+@save:
+    jmp OpenSave
+.endif
 .endproc
 
 ; =============================================================================
@@ -950,6 +1030,26 @@ OB_TRIG  = 8
 
 ; A = destination map, tmpa/tmpb = destination cell.
 .proc DoWarp
+    sta tmpd
+    ; Remember the way back before the map changes: EXIT CHIP returns to the
+    ; cell the party stepped in from, BEACON to the last town they entered.
+    lda map_flags
+    and #MF_DUNGEON
+    bne @inside                 ; already indoors: keep the outermost record
+    lda map_id
+    sta ret_map
+    lda ent_gx
+    sta ret_gx
+    lda ent_gy
+    sta ret_gy
+@inside:
+    lda tmpd
+    beq @notown
+    cmp #7                      ; map ids 1..6 are the six towns
+    bcs @notown
+    sta last_town
+@notown:
+    lda tmpd
     jsr LoadMap
     lda tmpa
     sta ent_gx
@@ -2366,7 +2466,7 @@ OB_TRIG  = 8
     jsr SetPrgCode
     jsr BattleTick
     lda btl_phase
-    cmp #10                     ; BP_DONE
+    cmp #<BP_DONE
     bcc @done
     lda btl_result
     cmp #2                      ; party wiped
@@ -2411,11 +2511,63 @@ OB_TRIG  = 8
     rts
 .endproc
 
+; Back to walking around: repaint the map (LoadMap re-arms its music) and carry
+; out anything the field menu asked for on its way out.
 .proc ReturnToField
+    lda #GS_FIELD
+    sta gamestate
+    lda ui_req
+    beq @here
+    jsr MenuWarp
+    bcs @done                   ; MenuWarp loaded and painted another map
+@here:
     lda map_id
     jsr LoadMap
     jsr UpdateCamera
     jsr DrawFullMap
+@done:
+    rts
+.endproc
+
+; The two item effects only the field can carry out.
+;   ui_req 1 = BEACON, back to the last town visited
+;   ui_req 2 = EXIT CHIP, out of a dungeon to where the party went in
+; Carry set if the warp happened; clear leaves the party where it is.
+.proc MenuWarp
+    ldx ui_req
+    lda #0
+    sta ui_req
+    cpx #2
+    beq @leave
+    lda last_town               ; 0 = no town visited yet
+    beq @no
+    sta tmpc
+    lda #12                     ; every town is entered at (12,18)
+    sta tmpa
+    lda #18
+    sta tmpb
+    jmp @go
+@leave:
+    lda map_flags
+    and #MF_DUNGEON
+    beq @no                     ; already outdoors
+    lda ret_map
+    ora ret_gx
+    ora ret_gy
+    beq @no                     ; nothing recorded to go back to
+    lda ret_map
+    sta tmpc
+    lda ret_gx
+    sta tmpa
+    lda ret_gy
+    sta tmpb
+@go:
+    lda tmpc
+    jsr DoWarp
+    sec
+    rts
+@no:
+    clc
     rts
 .endproc
 
@@ -2608,6 +2760,8 @@ state_tab:
     .addr StGameOver-1
     .addr StEnded-1
     .addr StTitle-1
+    .addr StMenu-1
+    .addr StShop-1
 
 dir_tile:  .byte HERO_TILE_UP, HERO_TILE_DOWN, HERO_TILE_SIDE, HERO_TILE_SIDE
 dir_attr:  .byte 0, 0, $40, 0

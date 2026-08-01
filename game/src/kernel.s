@@ -15,7 +15,7 @@
 .export SetPrgData, SetPrgCode, SetChrBank, WaitFrame, ReadInput
 .export VBufReset, VBufAlloc, Random, Rand16, Mul8, Div8, Div16
 .export PpuAddr, PpuFill, ClearNametables, LoadPalette, MemClear, MemCopy
-.export FarCall, WaitVBlank, ScreenOff, ScreenOn, SetMirror
+.export FarCall, FarCallRet, WaitVBlank, ScreenOff, ScreenOn, SetMirror
 
 ; Default CHR banks (1KB units) at boot.
 CHR_FONT_BANK  = 0
@@ -403,6 +403,30 @@ CHR_SPR1_BANK  = 90     ; 2KB sprite bank at $1800
 ;   A = bank, ptr = target address. The target's RTS returns to our caller.
 .proc FarCall
     jsr SetPrgCode
+    jmp (ptr)
+.endproc
+
+; Call a routine in ANOTHER $A000 code bank and come back to the caller's.
+; Two code banks share the $A000 window, so a plain jsr from one into the other
+; unmaps the caller mid-call; this trampoline runs from the fixed kernel bank,
+; so it survives the switch in both directions.
+;   in:  ptr = the target's address, far_bank = the bank it lives in.
+;        A, X and Y are passed through to the target untouched.
+;   out: the target's A, X and Y; the caller's code bank restored.
+.proc FarCallRet
+    pha
+    lda cur_code_bank
+    sta far_ret
+    lda far_bank
+    jsr SetPrgCode              ; X and Y are preserved by SetPrgCode
+    pla
+    jsr @call
+    pha
+    lda far_ret
+    jsr SetPrgCode
+    pla
+    rts
+@call:
     jmp (ptr)
 .endproc
 

@@ -49,8 +49,11 @@ ROW_BANNER = 2
 ROW_SLOT0  = 4
 ROW_PROMPT = 7
 ROW_LIST   = 9
-ROW_STATS  = 16
-ROW_HELP   = 20
+; A blank row between the class list and the panel below it: with the veteran
+; line hard against BRAWLER the panel still read as part of the list.
+ROW_VET    = 16         ; the veteran title of the class under the cursor
+ROW_STATS  = 17
+ROW_HELP   = 21
 
 ; title-screen rows
 ROW_NEW    = 22
@@ -502,6 +505,8 @@ F_BR = TILE_FRAME + 8
 .endproc
 
 .proc MarkStats
+    lda #ROW_VET
+    jsr MarkRow
     lda #ROW_STATS
     jsr MarkRow
     lda #ROW_STATS+1
@@ -643,6 +648,9 @@ F_BR = TILE_FRAME + 8
     cmp #ROW_LIST+N_CLASSES
     bcs :+
     jmp RowList
+:   cmp #ROW_VET
+    bne :+
+    jmp RowVet
 :   cmp #ROW_STATS
     bcc @out
     cmp #ROW_STATS+3
@@ -762,10 +770,6 @@ F_BR = TILE_FRAME + 8
 :   lda ti_tmp
     jsr ClassNamePtr
     ldx #5
-    jsr PutString
-    lda ti_tmp
-    jsr ClassVetPtr
-    ldx #18
     jmp PutString
 @ready:
     lda ti_row
@@ -795,6 +799,25 @@ F_BR = TILE_FRAME + 8
     stx ptr+1
     ldx #5
     jmp PutString
+.endproc
+
+; The veteran title belongs to the class under the cursor, not beside it. It
+; used to sit in a second column next to the class list, where it read as six
+; more options -- a player would move the cursor down the left column and
+; wonder why the right one could not be reached.
+.proc RowVet
+    lda ti_state
+    cmp #TI_READY
+    beq @out
+    lda #<s_vet
+    ldx #>s_vet
+    jsr PutAt4
+    lda ti_cursor
+    jsr ClassVetPtr
+    ldx #14
+    jmp PutString
+@out:
+    rts
 .endproc
 
 ; --- the stat panel for the class under the cursor ---------------------------
@@ -1043,6 +1066,7 @@ s_muster:   .byte "THRENOS - MUSTER", STR_END
 s_pick:     .byte "PICK MEMBER", STR_END
 s_empty:    .byte "-", STR_END
 s_help:     .byte "A CHOOSE    B BACK", STR_END
+s_vet:      .byte "VETERAN", STR_END
 s_ready:    .byte "THE SQUAD IS READY", STR_END
 s_begin:    .byte "MAKE PLANETFALL", STR_END
 s_over:     .byte "START OVER", STR_END

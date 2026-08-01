@@ -351,7 +351,18 @@ pat_empty:
 @ev:
     lda (snd_tmp),y
     iny
-    beq @end                ; $00
+.ifndef TEST_BROKEN_PARSER
+    cmp #$00                ; INY between the load and the branch sets Z from
+.endif                      ; Y, not from A -- without this compare, END is
+    beq @end                ; only seen when Y wraps, so the parser walks off
+                            ; the end of every pattern and plays the bytes that
+                            ; follow it as if they were events. That is the
+                            ; whole story of "no music, just a buzz".
+                            ;
+                            ; TEST_BROKEN_PARSER puts the bug back, so
+                            ; test/t_apu.py has a control that is known to be
+                            ; broken and must fail the checks the real ROM
+                            ; passes.
     cmp #$61
     bcc @note               ; $01..$60
     beq @rest               ; $61

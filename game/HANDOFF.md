@@ -40,6 +40,7 @@ python3 test/t_menu.py       # START: item, equip, tech, the character sheet
 python3 test/t_shop.py       # buying, selling, and a save terminal
 python3 test/t_item.py       # who a battle item is for, and revive
 python3 test/t_journey.py    # the shipped ROM, played: title -> town -> menu
+python3 test/t_apu.py        # the ROM actually plays notes (slow: ~3 min)
 ```
 
 `make SOUND=src/sound_stub.s` links a silent ROM — useful when bisecting.
@@ -141,7 +142,14 @@ Zero page is allocated to `$E1`; `battle.s` also claims `$F0-$F5` locally.
 7. **Data reads must set their own bank every time.** Any routine reading
    through $8000 sets `SetPrgData` first — the map, text and table banks all
    compete for that window.
-8. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
+8. **A flag-setting instruction between a load and its branch.** This project
+   has now shipped this bug twice. `INY` between `LDA (ptr),y` and `BMI` broke
+   the map RLE decoder; `INY` between `LDA (ptr),y` and `BEQ` broke the music
+   pattern parser, which then walked off the end of every pattern and played
+   whatever followed as if it were note data -- no music, a constant buzz, and
+   the whole test suite green. `INX`/`INY`/`DEX`/`DEY` set N and Z from the
+   register. Put an explicit `CMP` back in, or branch before you increment.
+9. **`LoadObjects` fills entity slots 1..`MAX_ENT`-1 and silently drops the
    rest.** The overworld had 14 warps against a cap of 11 and lost the
    Ossuary, the Causeway and Erebus — the endgame dungeon had no entrance at
    all, and nothing said so. `MAX_ENT` is 16 now and `check_world.py` asserts
